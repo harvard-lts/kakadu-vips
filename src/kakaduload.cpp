@@ -12,19 +12,65 @@
 
 #include <vips/vips.h>
 
-// Kakadu core includes
-#include "kdu_elementary.h"
-#include "kdu_messaging.h"
-#include "kdu_params.h"
-#include "kdu_compressed.h"
-#include "kdu_sample_processing.h"
-#include "kdu_block_coding.h"
-#include "kdu_arch.h"
+#include <jp2.h>
+#include <jpx.h>
 
-using namespace kdu_core;
+#include <iostream>
+
+using namespace kdu_supp; // includes the core namespace
 
 // i18n placeholder
 #define _(S) (S)
+
+/* A VipsSource as a Kakadu input object. This steals the reference
+ * on construct and unrefs on close.
+ */
+class VipsKakaduSource : public kdu_compressed_source {
+public:
+	VipsKakaduSource(VipsSource *_source)
+	{
+		source = _source;
+	}
+
+	~VipsKakaduSource()
+	{
+		VIPS_UNREF(source);
+	}
+
+	virtual int get_capabilities() 
+	{
+		return KDU_SOURCE_CAP_SEQUENTIAL | KDU_SOURCE_CAP_SEEKABLE; 
+	}
+
+	virtual bool seek(kdu_long offset)
+	{
+		return vips_source_seek(source, offset, SEEK_CUR) != -1;
+	}
+
+	virtual kdu_long get_pos()
+	{
+		 return vips_source_seek(source, 0, SEEK_CUR);
+	}
+
+	virtual int read(kdu_byte *buf, int num_bytes)
+	{
+		return vips_source_read(source, buf, num_bytes);
+	}
+
+	void rewind()
+	{
+		vips_source_rewind(source);
+	}
+
+	virtual bool close()
+	{
+		VIPS_UNREF(source);
+		return true;
+	}
+
+private:
+	VipsSource *source;
+};
 
 typedef struct _VipsForeignLoadKakadu {
 	VipsForeignLoad parent_object;
@@ -32,6 +78,10 @@ typedef struct _VipsForeignLoadKakadu {
 	/* Source to load from (set by subclasses).
 	 */
 	VipsSource *source;
+
+	/* Wrapped up as a kakadu loader.
+	 */
+	VipsKakaduSource *kakadu_source;
 
 	/* Page set by user, then we translate that into shrink factor.
 	 */
@@ -95,45 +145,9 @@ vips_foreign_load_kakadu_dispose(GObject *gobject)
 	 */
 
 	VIPS_UNREF(kakadu->source);
+	delete[] kakadu->kakadu_source;
 
 	G_OBJECT_CLASS(vips_foreign_load_kakadu_parent_class)->dispose(gobject);
-}
-
-static size_t
-vips_foreign_load_kakadu_read_source(void *buffer, size_t length, void *client)
-{
-	VipsSource *source = VIPS_SOURCE(client);
-	gint64 bytes_read = vips_source_read(source, buffer, length);
-
-	/* openjpeg read uses -1 for both EOF and error return.
-	 */
-	return bytes_read == 0 ? -1 : bytes_read;
-}
-
-static off_t
-vips_foreign_load_kakadu_skip_source(off_t n_bytes, void *client)
-{
-	VipsSource *source = VIPS_SOURCE(client);
-
-	if (vips_source_seek(source, n_bytes, SEEK_CUR) == -1)
-		/* openjpeg skip uses -1 for both end of stream and error.
-		 */
-		return -1;
-
-	return n_bytes;
-}
-
-static bool
-vips_foreign_load_kakadu_seek_source(off_t position, void *client)
-{
-	VipsSource *source = VIPS_SOURCE(client);
-
-	if (vips_source_seek(source, position, SEEK_SET) == -1)
-		/* openjpeg seek uses FALSE for both end of stream and error.
-		 */
-		return FALSE;
-
-	return TRUE;
 }
 
 static int
@@ -145,6 +159,26 @@ vips_foreign_load_kakadu_build(VipsObject *object)
 #ifdef DEBUG
 	printf("vips_foreign_load_kakadu_build:\n");
 #endif /*DEBUG*/
+
+/*
+class kdu_stream_message : public kdu_thread_safe_message {
+  public: // Member classes
+	kdu_stream_message(std::ostream *stream)
+	  { this->stream = stream; }
+	void put_text(const char *string)
+	  { (*stream) << string; }
+	void flush(bool end_of_message=false)
+	  { stream->flush();
+		kdu_thread_safe_message::flush(end_of_message); }
+  private: // Data
+	std::ostream *stream;
+};
+
+static kdu_stream_message cout_message(&std::cout);
+static kdu_stream_message cerr_message(&std::cerr);
+static kdu_message_formatter pretty_cout(&cout_message);
+static kdu_message_formatter pretty_cerr(&cerr_message);
+ */
 
 	/*
 static void
@@ -184,6 +218,10 @@ set_error_behaviour(kdu_args &args, kdu_codestream codestream)
 		}
 	}
 	 */
+
+	kakadu->kakadu_source = new VipsKakaduSource(kakadu->source);
+	// kakadu_source holds the ref now
+	kakadu->source = NULL;
 
 	if (VIPS_OBJECT_CLASS(vips_foreign_load_kakadu_parent_class)->build(object))
 		return -1;
@@ -229,26 +267,6 @@ vips_foreign_load_kakadu_get_flags(VipsForeignLoad *load)
 {
 	return VIPS_FOREIGN_PARTIAL;
 }
-
-/*
-class kdu_stream_message : public kdu_thread_safe_message {
-  public: // Member classes
-	kdu_stream_message(std::ostream *stream)
-	  { this->stream = stream; }
-	void put_text(const char *string)
-	  { (*stream) << string; }
-	void flush(bool end_of_message=false)
-	  { stream->flush();
-		kdu_thread_safe_message::flush(end_of_message); }
-  private: // Data
-	std::ostream *stream;
-};
-
-static kdu_stream_message cout_message(&std::cout);
-static kdu_stream_message cerr_message(&std::cerr);
-static kdu_message_formatter pretty_cout(&cout_message);
-static kdu_message_formatter pretty_cerr(&cerr_message);
- */
 
 static int
 vips_foreign_load_kakadu_set_header(VipsForeignLoadKakadu *kakadu, 
@@ -302,7 +320,45 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 	printf("vips_foreign_load_kakadu_header:\n");
 #endif /*DEBUG*/
 
-	vips_source_rewind(kakadu->source);
+	kakadu->kakadu_source->rewind();
+
+	jp2_family_src input;
+	input.open(kakadu->kakadu_source);
+
+	jpx_source source;
+	jpx_layer_source layer;
+	jpx_codestream_source codestream;
+
+	// all the file meta
+	jp2_channels channels;
+	jp2_palette palette;
+	jp2_resolution resolution;
+	jp2_colour colour;
+	kdu_coords layer_size;
+
+	if (source.open(&input, true) > 0) {
+		// a jp2/jph file 
+		layer = source.access_layer(0);
+		resolution = layer.access_resolution();
+		colour = layer.access_colour(0);
+		layer_size = layer.get_layer_size();
+
+		channels = layer.access_channels();
+		int cmp, plt, stream_id = 0, fmt;
+		if (!channels.get_colour_mapping(0, cmp, plt, stream_id, fmt)) {
+			kdu_uint16 key;
+			channels.get_non_colour_mapping(0, key, cmp, plt, stream_id, fmt);
+		}
+		codestream = source.access_codestream(stream_id);
+		palette = codestream.access_palette();
+
+#ifdef DEBUG
+		printf("vips_foreign_load_kakadu_header: opened as jpx\n");
+		printf("  source.get_metadata_memory() = %lld\n", 
+				source.get_metadata_memory());
+
+#endif /*DEBUG*/
+	}
 
 	/*
 	if (!(kakadu->codec = opj_create_decompress(kakadu->format)))

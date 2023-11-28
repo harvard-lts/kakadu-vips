@@ -23,9 +23,12 @@ LDFLAGS += `pkg-config vips --libs`
 KAKADUHOME = $(shell echo ../kakadu/v* | sed 's/ /\n/g' | grep -v .zip)
 KAKADU_ARCH = Linux-x86-64-gcc
 KAKADU_VERSION = 83R
-KAKADU_LIB = kdu_$(KAKADU_VERSION).so
-CPPFLAGS += -I$(KAKADUHOME)/coresys/common
-LDFLAGS += -L$(KAKADUHOME)/lib/$(KAKADU_ARCH) -l$(KAKADU_LIB)
+KAKADU_LIB = kdu_v$(KAKADU_VERSION)
+KAKADU_AUX_LIB = kdu_a$(KAKADU_VERSION)
+CPPFLAGS += -I$(KAKADUHOME)/coresys/common 
+CPPFLAGS += -I$(KAKADUHOME)/managed/all_includes
+LDFLAGS += -L$(KAKADUHOME)/lib/$(KAKADU_ARCH)
+LDFLAGS += -l$(KAKADU_LIB) -l$(KAKADU_AUX_LIB)
 
 OUT = vips-kakadu.so
 
@@ -40,7 +43,7 @@ release: CXXFLAGS += -O3
 
 $(OUT): $(OBJS)
 # must link C++ plugins with the C++ compiler
-	$(CXX) -o $(OUT) -shared $(OBJS)
+	$(CXX) -o $(OUT) -shared $(OBJS) $(LDFLAGS)
 
 clean: 
 	$(RM) $(OBJS) 

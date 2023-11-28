@@ -49,11 +49,18 @@ $ cd v8_3-02172N/coresys/make
 $ make -f Makefile-Linux-x86-64-gcc
 ```
 
+And the aux library with:
+
+```
+$ cd v8_3-02172N/managed/make
+$ make -f Makefile-Linux-x86-64-gcc all_but_jni
+```
+
 Makes:
 
 ```
 $ ls v8_3-02172N/lib/Linux-x86-64-gcc/
-libkdu.a  libkdu_v83R.so
+libkdu.a  libkdu_a83R.so  libkdu_aux.a  libkdu_v83R.so
 $ ls v8_3-02172N/coresys/common/*.h
 v8_3-02172N/coresys/common/kdu_arch.h
 v8_3-02172N/coresys/common/kdu_block_coding.h
