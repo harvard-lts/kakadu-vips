@@ -22,18 +22,23 @@ using namespace kdu_supp; // includes the core namespace
 // i18n placeholder
 #define _(S) (S)
 
-/* A VipsSource as a Kakadu input object. This steals the reference
- * on construct and unrefs on close.
+/* A VipsSource as a Kakadu input object. This keeps the reference
+ * alive while it's alive.
  */
 class VipsKakaduSource : public kdu_compressed_source {
 public:
 	VipsKakaduSource(VipsSource *_source)
 	{
 		source = _source;
+		g_object_ref(source);
 	}
 
 	~VipsKakaduSource()
 	{
+#ifdef DEBUG
+		printf("~VipsKakaduSource:\n");
+#endif /*DEBUG*/
+
 		VIPS_UNREF(source);
 	}
 
@@ -44,7 +49,13 @@ public:
 
 	virtual bool seek(kdu_long offset)
 	{
-		return vips_source_seek(source, offset, SEEK_CUR) != -1;
+		int result = vips_source_seek(source, offset, SEEK_SET);
+#ifdef DEBUG_VERBOSE
+		printf("VipsKakaduSource: seek(%lld) == %d\n", offset, result);
+#endif /*DEBUG_VERBOSE*/
+
+		// kakadu assumes this will always succeed
+		return true;
 	}
 
 	virtual kdu_long get_pos()
@@ -54,7 +65,13 @@ public:
 
 	virtual int read(kdu_byte *buf, int num_bytes)
 	{
-		return vips_source_read(source, buf, num_bytes);
+		gint64 bytes_read = vips_source_read(source, buf, num_bytes);
+
+#ifdef DEBUG_VERBOSE
+		printf("VipsKakaduSource: read(%d) = %ld\n", num_bytes, bytes_read);
+#endif /*DEBUG_VERBOSE*/
+
+		return bytes_read;
 	}
 
 	void rewind()
@@ -64,6 +81,10 @@ public:
 
 	virtual bool close()
 	{
+#ifdef DEBUG
+		printf("VipsKakaduSource: close()\n");
+#endif /*DEBUG*/
+
 		VIPS_UNREF(source);
 		return true;
 	}
@@ -144,8 +165,11 @@ vips_foreign_load_kakadu_dispose(GObject *gobject)
 	VIPS_FREEF(opj_image_destroy, kakadu->image);
 	 */
 
+	if (kakadu->kakadu_source) {
+		delete kakadu->kakadu_source;
+		kakadu->kakadu_source = NULL;
+	}
 	VIPS_UNREF(kakadu->source);
-	delete[] kakadu->kakadu_source;
 
 	G_OBJECT_CLASS(vips_foreign_load_kakadu_parent_class)->dispose(gobject);
 }
@@ -220,10 +244,9 @@ set_error_behaviour(kdu_args &args, kdu_codestream codestream)
 	 */
 
 	kakadu->kakadu_source = new VipsKakaduSource(kakadu->source);
-	// kakadu_source holds the ref now
-	kakadu->source = NULL;
 
-	if (VIPS_OBJECT_CLASS(vips_foreign_load_kakadu_parent_class)->build(object))
+	if (VIPS_OBJECT_CLASS(vips_foreign_load_kakadu_parent_class)->
+			build(object))
 		return -1;
 
 	return 0;
@@ -308,6 +331,41 @@ vips_foreign_load_kakadu_set_header(VipsForeignLoadKakadu *kakadu,
 	return 0;
 }
 
+#ifdef DEBUG
+static const char *
+space2string(jp2_colour_space space)
+{
+	switch(space) {
+	case JP2_EMPTY_SPACE: 		return "JP2_EMPTY_SPACE";
+	case JP2_bilevel1_SPACE: 	return "JP2_bilevel1_SPACE";
+	case JP2_YCbCr1_SPACE: 		return "JP2_YCbCr1_SPACE";
+	case JP2_YCbCr2_SPACE: 		return "JP2_YCbCr2_SPACE";
+	case JP2_YCbCr3_SPACE: 		return "JP2_YCbCr3_SPACE";
+	case JP2_PhotoYCC_SPACE: 	return "JP2_PhotoYCC_SPACE";
+	case JP2_CMY_SPACE: 		return "JP2_CMY_SPACE";
+	case JP2_CMYK_SPACE: 		return "JP2_CMYK_SPACE";
+	case JP2_YCCK_SPACE: 		return "JP2_YCCK_SPACE";
+	case JP2_CIELab_SPACE: 		return "JP2_CIELab_SPACE";
+	case JP2_bilevel2_SPACE: 	return "JP2_bilevel2_SPACE";
+	case JP2_sRGB_SPACE: 		return "JP2_sRGB_SPACE";
+	case JP2_sLUM_SPACE: 		return "JP2_sLUM_SPACE";
+	case JP2_sYCC_SPACE: 		return "JP2_sYCC_SPACE";
+	case JP2_CIEJab_SPACE: 		return "JP2_CIEJab_SPACE";
+	case JP2_esRGB_SPACE: 		return "JP2_esRGB_SPACE";
+	case JP2_ROMMRGB_SPACE: 	return "JP2_ROMMRGB_SPACE";
+	case JP2_YPbPr60_SPACE: 	return "JP2_YPbPr60_SPACE";
+	case JP2_YPbPr50_SPACE: 	return "JP2_YPbPr50_SPACE";
+	case JP2_esYCC_SPACE: 		return "JP2_esYCC_SPACE";
+	case JP2_iccLUM_SPACE: 		return "JP2_iccLUM_SPACE";
+	case JP2_iccRGB_SPACE: 		return "JP2_iccRGB_SPACE";
+	case JP2_iccANY_SPACE: 		return "JP2_iccANY_SPACE";
+	case JP2_vendor_SPACE: 		return "JP2_vendor_SPACE";
+
+	default:					return "<unknown>";
+	}
+}
+#endif /*DEBUG*/
+
 static int
 vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 {
@@ -336,8 +394,16 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 	jp2_colour colour;
 	kdu_coords layer_size;
 
-	if (source.open(&input, true) > 0) {
+	int result = source.open(&input, true);
+	printf("vips_foreign_load_kakadu_header: open() = %d\n", result);
+	if (result > 0) {
+		int count;
+
 		// a jp2/jph file 
+#ifdef DEBUG
+		printf("vips_foreign_load_kakadu_header: opened as jpx\n");
+#endif /*DEBUG*/
+
 		layer = source.access_layer(0);
 		resolution = layer.access_resolution();
 		colour = layer.access_colour(0);
@@ -353,10 +419,80 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 		palette = codestream.access_palette();
 
 #ifdef DEBUG
-		printf("vips_foreign_load_kakadu_header: opened as jpx\n");
 		printf("  source.get_metadata_memory() = %lld\n", 
 				source.get_metadata_memory());
 
+		if (source.count_codestreams(count))
+			printf("  source.count_codestreams() = %d\n", count);
+
+		jpx_compatibility compat = source.access_compatibility();
+		printf("  compat.is_jp2() = %d\n", compat.is_jp2());
+		printf("  compat.is_jp2_compatible() = %d\n", 
+				compat.is_jp2_compatible());
+		printf("  compat.is_jph_compatible() = %d\n", 
+				compat.is_jph_compatible());
+		printf("  compat.is_jpxb_compatible() = %d\n", 
+				compat.is_jpxb_compatible());
+		printf("  compat.is_jhxb_compatible() = %d\n", 
+				compat.is_jhxb_compatible());
+		printf("  compat.has_reader_requirements_box() = %d\n", 
+				compat.has_reader_requirements_box());
+		// use compat.check_standard_feature() to make sure we can decode
+
+		if (source.count_compositing_layers(count))
+			printf("  source.count_compositing_layers() = %d\n", count);
+		if (source.count_containers(count))
+			printf("  source.count_containers() = %d\n", count);
+
+		printf("  layer.get_layer_id() = %d\n", layer.get_layer_id());
+		printf("  layer.get_num_codestreams() = %d\n", 
+				layer.get_num_codestreams());
+		printf("  layer_size.get_x() = %d\n", layer_size.get_x());
+		printf("  layer_size.get_y() = %d\n", layer_size.get_y());
+
+		
+		printf("  resolution.get_aspect_ratio() = %g\n", 
+				resolution.get_aspect_ratio());
+		printf("  resolution.get_resolution() = %g pixels per metre\n", 
+				resolution.get_resolution());
+
+		printf("  colour.get_num_colours() = %d\n", colour.get_num_colours());
+		printf("  colour.get_space() = %s\n", 
+				space2string(colour.get_space()));
+		printf("  colour.is_opponent_space() = %d\n", 
+				colour.is_opponent_space());
+		for (i = 0; i < colour.get_num_colours(); i++)
+			printf("  colour.get_natural_unsigned_zero_point(%d) = %f\n", 
+					i, colour.get_natural_unsigned_zero_point(i));
+		printf("  colour.get_approximation_level() = %d\n", 
+				colour.get_approximation_level());
+
+		int num_bytes;
+		const kdu_byte *data = colour.get_icc_profile(&num_bytes);
+		printf("  colour.get_icc_profile() = %d bytes\n", num_bytes);
+
+		printf("  channels.get_colour_mapping().cmp = %d\n", cmp);
+		printf("  channels.get_colour_mapping().lut = %d\n", plt);
+		printf("  channels.get_colour_mapping().stream_id = %d\n", stream_id);
+		printf("  channels.get_colour_mapping().fmt = %d\n", fmt);
+		printf("  channels.get_num_colours() = %d\n", 
+				channels.get_num_colours());
+		printf("  channels.get_num_non_colours() = %d\n", 
+				channels.get_num_non_colours());
+
+		printf("  palette.exists() = %d\n", palette.exists());
+		printf("  palette.get_num_entries() = %d\n", 
+				palette.get_num_entries());
+		printf("  palette.get_num_luts() = %d\n", palette.get_num_luts());
+		for (i = 0; i < palette.get_num_luts(); i++)
+			printf("  palette.get_bit_depth(%d) = %d\n", 
+					i, palette.get_bit_depth(i));
+#endif /*DEBUG*/
+	}
+	else {
+#ifdef DEBUG
+		printf("vips_foreign_load_kakadu_header: "
+				"not a jpx ... raw codec load\n");
 #endif /*DEBUG*/
 	}
 
