@@ -98,9 +98,9 @@ typedef struct _VipsForeignLoadKakadu {
 
 	/* Source to load from (set by subclasses).
 	 */
-	VipsSource *source;
+	VipsSource *vips_source;
 
-	/* Wrapped up as a kakadu loader.
+	/* "source" wrapped up as a kakadu byte data source.
 	 */
 	VipsKakaduSource *kakadu_source;
 
@@ -109,14 +109,27 @@ typedef struct _VipsForeignLoadKakadu {
 	int page;
 	int shrink;
 
-	/* Decompress state.
-	opj_stream_t *stream;			// Source as an opj stream 
-	OPJ_CODEC_FORMAT format;		// libopenjp2 format 
-	opj_codec_t *codec;				// Decompress codec 
-	opj_dparameters_t parameters;	// Core decompress params 
-	opj_image_t *image;				// Read image to here 
-	opj_codestream_info_v2_t *info; // Tile geometry 
+	/* The kakadu input objects.
 	 */
+	jp2_family_src *input;
+	jpx_source *source;
+
+	/* Refs to parts of the input object we discover.
+	 */
+	jpx_layer_source layer;
+	jpx_codestream_source codestream;
+	jp2_channels channels;
+	jp2_palette palette;
+	jp2_resolution resolution;
+	jp2_colour colour;
+	kdu_coords layer_size;
+
+	/* kakadu colour mapping.
+	 */
+	int cmp;
+	int lut;
+	int stream_id;
+	int fmt;
 
 	/* Number of errors reported during load -- use this to block load of
 	 * corrupted images.
@@ -139,6 +152,16 @@ extern "C" {
 		VIPS_TYPE_FOREIGN_LOAD);
 }
 
+#define DELETE(P) \
+G_STMT_START \
+    { \
+        if (P) { \
+            delete (P); \
+            (P) = NULL; \
+        } \
+    } \
+G_STMT_END
+
 static void
 vips_foreign_load_kakadu_dispose(GObject *gobject)
 {
@@ -148,28 +171,11 @@ vips_foreign_load_kakadu_dispose(GObject *gobject)
 	printf("vips_foreign_load_kakadu_dispose:\n");
 #endif /*DEBUG*/
 
-	/*
-	 * FIXME ... do we need this? seems to just cause warnings
-	 *
-	if (kakadu->codec &&
-		kakadu->stream)
-		opj_end_decompress(kakadu->codec, kakadu->stream);
-	 *
-	 */
+	DELETE(kakadu->input);
+	DELETE(kakadu->source);
+	DELETE(kakadu->kakadu_source);
 
-	/*
-	if (kakadu->info)
-		opj_destroy_cstr_info(&kakadu->info);
-	VIPS_FREEF(opj_destroy_codec, kakadu->codec);
-	VIPS_FREEF(opj_stream_destroy, kakadu->stream);
-	VIPS_FREEF(opj_image_destroy, kakadu->image);
-	 */
-
-	if (kakadu->kakadu_source) {
-		delete kakadu->kakadu_source;
-		kakadu->kakadu_source = NULL;
-	}
-	VIPS_UNREF(kakadu->source);
+	VIPS_UNREF(kakadu->vips_source);
 
 	G_OBJECT_CLASS(vips_foreign_load_kakadu_parent_class)->dispose(gobject);
 }
@@ -243,7 +249,11 @@ set_error_behaviour(kdu_args &args, kdu_codestream codestream)
 	}
 	 */
 
-	kakadu->kakadu_source = new VipsKakaduSource(kakadu->source);
+	kakadu->kakadu_source = new VipsKakaduSource(kakadu->vips_source);
+
+	// read bytes and image data into these
+	kakadu->input = new jp2_family_src();
+	kakadu->source = new jpx_source();
 
 	if (VIPS_OBJECT_CLASS(vips_foreign_load_kakadu_parent_class)->
 			build(object))
@@ -301,25 +311,92 @@ vips_foreign_load_kakadu_set_header(VipsForeignLoadKakadu *kakadu,
 	printf("vips_foreign_load_kakadu_set_header:\n");
 #endif /*DEBUG*/
 
-	/*
 	if (vips_image_pipelinev(out, VIPS_DEMAND_STYLE_SMALLTILE, NULL))
 		return -1;
 
-	vips_image_init_fields(out,
-		first->w, first->h, kakadu->image->numcomps, format,
-		VIPS_CODING_NONE, interpretation, 1.0, 1.0);
+	int bands = kakadu->channels.get_num_colours() + 
+		kakadu->channels.get_num_non_colours();
 
+	VipsInterpretation interpretation;
+	int expected_colour_bands;
+	switch (kakadu->colour.get_space()) {
+	case JP2_CMYK_SPACE:
+		interpretation = VIPS_INTERPRETATION_CMYK;
+		expected_colour_bands = 4;
+		break;
+
+	case JP2_CIELab_SPACE:
+		interpretation = VIPS_INTERPRETATION_LAB;
+		expected_colour_bands = 3;
+		break;
+
+	case JP2_sRGB_SPACE:
+		interpretation = VIPS_INTERPRETATION_sRGB;
+		expected_colour_bands = 3;
+		break;
+
+	case JP2_EMPTY_SPACE: 		
+	case JP2_CMY_SPACE:
+	case JP2_bilevel1_SPACE:
+	case JP2_YCbCr1_SPACE:
+	case JP2_YCbCr2_SPACE:
+	case JP2_YCbCr3_SPACE:
+	case JP2_PhotoYCC_SPACE:
+	case JP2_YCCK_SPACE:
+	case JP2_bilevel2_SPACE:
+	case JP2_sLUM_SPACE:
+	case JP2_sYCC_SPACE:
+	case JP2_CIEJab_SPACE:
+	case JP2_esRGB_SPACE:
+	case JP2_ROMMRGB_SPACE:
+	case JP2_YPbPr60_SPACE:
+	case JP2_YPbPr50_SPACE:
+	case JP2_esYCC_SPACE:
+	case JP2_iccLUM_SPACE:
+	case JP2_iccRGB_SPACE:
+	case JP2_iccANY_SPACE:
+	case JP2_vendor_SPACE:
+	default:
+		// unimplemented, or we're unsure
+		interpretation = VIPS_INTERPRETATION_MULTIBAND;
+		break;
+	}
+
+	if (kakadu->channels.get_num_colours() != expected_colour_bands) {
+		vips_error(klass->nickname,
+			"%s", _("incorrect number of colour bands for colour space"));
+		return -1;
+	}
+
+	// FIXME ... perhaps we have to decode data to get the format?
+	VipsBandFormat format = VIPS_FORMAT_UCHAR;
+
+	// kakadu uses pixels per metre
+	float yres = kakadu->resolution.get_resolution() / 1000.0;
+	float xres = yres * kakadu->resolution.get_aspect_ratio();
+
+	vips_image_init_fields(out,
+		kakadu->layer_size.get_x(), kakadu->layer_size.get_y(), 
+		bands, 
+		format,
+		VIPS_CODING_NONE, 
+		interpretation, 
+		xres, 
+		yres);
+
+	/*
 	out->Xoffset =
 		-VIPS_ROUND_INT((double) kakadu->image->x0 / kakadu->shrink);
 	out->Yoffset =
 		-VIPS_ROUND_INT((double) kakadu->image->y0 / kakadu->shrink);
+	 */
 
-	if (kakadu->image->icc_profile_buf &&
-		kakadu->image->icc_profile_len > 0)
-		vips_image_set_blob_copy(out, VIPS_META_ICC_NAME,
-			kakadu->image->icc_profile_buf,
-			kakadu->image->icc_profile_len);
+	int num_bytes;
+	const kdu_byte *data = kakadu->colour.get_icc_profile(&num_bytes);
+	if (num_bytes > 0)
+		vips_image_set_blob_copy(out, VIPS_META_ICC_NAME, data, num_bytes);
 
+	/*
 	if (kakadu->info &&
 		kakadu->info->m_default_tile_info.tccp_info)
 		vips_image_set_int(out, VIPS_META_N_PAGES,
@@ -380,21 +457,8 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 
 	kakadu->kakadu_source->rewind();
 
-	jp2_family_src input;
-	input.open(kakadu->kakadu_source);
-
-	jpx_source source;
-	jpx_layer_source layer;
-	jpx_codestream_source codestream;
-
-	// all the file meta
-	jp2_channels channels;
-	jp2_palette palette;
-	jp2_resolution resolution;
-	jp2_colour colour;
-	kdu_coords layer_size;
-
-	int result = source.open(&input, true);
+	kakadu->input->open(kakadu->kakadu_source);
+	int result = kakadu->source->open(kakadu->input, true);
 	printf("vips_foreign_load_kakadu_header: open() = %d\n", result);
 	if (result > 0) {
 		int count;
@@ -404,28 +468,37 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 		printf("vips_foreign_load_kakadu_header: opened as jpx\n");
 #endif /*DEBUG*/
 
-		layer = source.access_layer(0);
-		resolution = layer.access_resolution();
-		colour = layer.access_colour(0);
-		layer_size = layer.get_layer_size();
+		kakadu->layer = kakadu->source->access_layer(0);
+		kakadu->resolution = kakadu->layer.access_resolution();
+		kakadu->colour = kakadu->layer.access_colour(0);
+		kakadu->layer_size = kakadu->layer.get_layer_size();
 
-		channels = layer.access_channels();
-		int cmp, plt, stream_id = 0, fmt;
-		if (!channels.get_colour_mapping(0, cmp, plt, stream_id, fmt)) {
+		kakadu->channels = kakadu->layer.access_channels();
+		if (!kakadu->channels.get_colour_mapping(0, 
+				kakadu->cmp, 
+				kakadu->lut, 
+				kakadu->stream_id, 
+				kakadu->fmt)) {
 			kdu_uint16 key;
-			channels.get_non_colour_mapping(0, key, cmp, plt, stream_id, fmt);
+			kakadu->channels.get_non_colour_mapping(0, 
+				key,
+				kakadu->cmp, 
+				kakadu->lut, 
+				kakadu->stream_id, 
+				kakadu->fmt);
 		}
-		codestream = source.access_codestream(stream_id);
-		palette = codestream.access_palette();
+		kakadu->codestream = 
+			kakadu->source->access_codestream(kakadu->stream_id);
+		kakadu->palette = kakadu->codestream.access_palette();
 
 #ifdef DEBUG
 		printf("  source.get_metadata_memory() = %lld\n", 
-				source.get_metadata_memory());
+				kakadu->source->get_metadata_memory());
 
-		if (source.count_codestreams(count))
+		if (kakadu->source->count_codestreams(count))
 			printf("  source.count_codestreams() = %d\n", count);
 
-		jpx_compatibility compat = source.access_compatibility();
+		jpx_compatibility compat = kakadu->source->access_compatibility();
 		printf("  compat.is_jp2() = %d\n", compat.is_jp2());
 		printf("  compat.is_jp2_compatible() = %d\n", 
 				compat.is_jp2_compatible());
@@ -439,54 +512,57 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 				compat.has_reader_requirements_box());
 		// use compat.check_standard_feature() to make sure we can decode
 
-		if (source.count_compositing_layers(count))
+		if (kakadu->source->count_compositing_layers(count))
 			printf("  source.count_compositing_layers() = %d\n", count);
-		if (source.count_containers(count))
+		if (kakadu->source->count_containers(count))
 			printf("  source.count_containers() = %d\n", count);
 
-		printf("  layer.get_layer_id() = %d\n", layer.get_layer_id());
+		printf("  layer.get_layer_id() = %d\n", kakadu->layer.get_layer_id());
 		printf("  layer.get_num_codestreams() = %d\n", 
-				layer.get_num_codestreams());
-		printf("  layer_size.get_x() = %d\n", layer_size.get_x());
-		printf("  layer_size.get_y() = %d\n", layer_size.get_y());
+				kakadu->layer.get_num_codestreams());
+		printf("  layer_size.get_x() = %d\n", kakadu->layer_size.get_x());
+		printf("  layer_size.get_y() = %d\n", kakadu->layer_size.get_y());
 
 		
 		printf("  resolution.get_aspect_ratio() = %g\n", 
-				resolution.get_aspect_ratio());
+				kakadu->resolution.get_aspect_ratio());
 		printf("  resolution.get_resolution() = %g pixels per metre\n", 
-				resolution.get_resolution());
+				kakadu->resolution.get_resolution());
 
-		printf("  colour.get_num_colours() = %d\n", colour.get_num_colours());
+		printf("  colour.get_num_colours() = %d\n", 
+				kakadu->colour.get_num_colours());
 		printf("  colour.get_space() = %s\n", 
-				space2string(colour.get_space()));
+				space2string(kakadu->colour.get_space()));
 		printf("  colour.is_opponent_space() = %d\n", 
-				colour.is_opponent_space());
-		for (i = 0; i < colour.get_num_colours(); i++)
+				kakadu->colour.is_opponent_space());
+		for (i = 0; i < kakadu->colour.get_num_colours(); i++)
 			printf("  colour.get_natural_unsigned_zero_point(%d) = %f\n", 
-					i, colour.get_natural_unsigned_zero_point(i));
+					i, kakadu->colour.get_natural_unsigned_zero_point(i));
 		printf("  colour.get_approximation_level() = %d\n", 
-				colour.get_approximation_level());
+				kakadu->colour.get_approximation_level());
 
 		int num_bytes;
-		const kdu_byte *data = colour.get_icc_profile(&num_bytes);
+		const kdu_byte *data = kakadu->colour.get_icc_profile(&num_bytes);
 		printf("  colour.get_icc_profile() = %d bytes\n", num_bytes);
 
-		printf("  channels.get_colour_mapping().cmp = %d\n", cmp);
-		printf("  channels.get_colour_mapping().lut = %d\n", plt);
-		printf("  channels.get_colour_mapping().stream_id = %d\n", stream_id);
-		printf("  channels.get_colour_mapping().fmt = %d\n", fmt);
+		printf("  channels.get_colour_mapping().cmp = %d\n", kakadu->cmp);
+		printf("  channels.get_colour_mapping().lut = %d\n", kakadu->lut);
+		printf("  channels.get_colour_mapping().stream_id = %d\n", 
+				kakadu->stream_id);
+		printf("  channels.get_colour_mapping().fmt = %d\n", kakadu->fmt);
 		printf("  channels.get_num_colours() = %d\n", 
-				channels.get_num_colours());
+				kakadu->channels.get_num_colours());
 		printf("  channels.get_num_non_colours() = %d\n", 
-				channels.get_num_non_colours());
+				kakadu->channels.get_num_non_colours());
 
-		printf("  palette.exists() = %d\n", palette.exists());
+		printf("  palette.exists() = %d\n", kakadu->palette.exists());
 		printf("  palette.get_num_entries() = %d\n", 
-				palette.get_num_entries());
-		printf("  palette.get_num_luts() = %d\n", palette.get_num_luts());
-		for (i = 0; i < palette.get_num_luts(); i++)
+				kakadu->palette.get_num_entries());
+		printf("  palette.get_num_luts() = %d\n", 
+				kakadu->palette.get_num_luts());
+		for (i = 0; i < kakadu->palette.get_num_luts(); i++)
 			printf("  palette.get_bit_depth(%d) = %d\n", 
-					i, palette.get_bit_depth(i));
+					i, kakadu->palette.get_bit_depth(i));
 #endif /*DEBUG*/
 	}
 	else {
@@ -507,7 +583,7 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 		return -1;
 
 	VIPS_SETSTR(load->out->filename,
-		vips_connection_filename(VIPS_CONNECTION(kakadu->source)));
+		vips_connection_filename(VIPS_CONNECTION(kakadu->vips_source)));
 
 	return 0;
 }
@@ -733,7 +809,7 @@ vips_foreign_load_kakadu_file_build(VipsObject *object)
 	VipsForeignLoadKakaduFile *file = (VipsForeignLoadKakaduFile *) object;
 
 	if (file->filename &&
-		!(kakadu->source = vips_source_new_from_file(file->filename)))
+		!(kakadu->vips_source = vips_source_new_from_file(file->filename)))
 		return -1;
 
 	if (VIPS_OBJECT_CLASS(vips_foreign_load_kakadu_file_parent_class)
@@ -816,7 +892,7 @@ vips_foreign_load_kakadu_buffer_build(VipsObject *object)
 		(VipsForeignLoadKakaduBuffer *) object;
 
 	if (buffer->buf)
-		if (!(kakadu->source = vips_source_new_from_memory(
+		if (!(kakadu->vips_source = vips_source_new_from_memory(
 				  VIPS_AREA(buffer->buf)->data,
 				  VIPS_AREA(buffer->buf)->length)))
 			return -1;
@@ -895,8 +971,8 @@ vips_foreign_load_kakadu_source_build(VipsObject *object)
 		(VipsForeignLoadKakaduSource *) object;
 
 	if (source->source) {
-		kakadu->source = source->source;
-		g_object_ref(kakadu->source);
+		kakadu->vips_source = source->source;
+		g_object_ref(kakadu->vips_source);
 	}
 
 	if (VIPS_OBJECT_CLASS(vips_foreign_load_kakadu_source_parent_class)
