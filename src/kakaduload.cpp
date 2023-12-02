@@ -117,12 +117,16 @@ typedef struct _VipsForeignLoadKakadu {
 	/* Refs to parts of the input object we discover.
 	 */
 	jpx_layer_source layer;
-	jpx_codestream_source codestream;
 	jp2_channels channels;
 	jp2_palette palette;
 	jp2_resolution resolution;
 	jp2_colour colour;
 	kdu_coords layer_size;
+
+	/* For detailed parsing.
+	 */
+	kdu_codestream codestream;
+	kdu_dims tile_indices;
 
 	/* kakadu colour mapping.
 	 */
@@ -258,6 +262,10 @@ set_error_behaviour(kdu_args &args, kdu_codestream codestream)
 	if (VIPS_OBJECT_CLASS(vips_foreign_load_kakadu_parent_class)->
 			build(object))
 		return -1;
+
+	// we use page to set the reduction factor so we work simply with
+	// "thumbnail"
+	kakadu->shrink = 1 << kakadu->page;
 
 	return 0;
 }
@@ -487,9 +495,9 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 				kakadu->stream_id, 
 				kakadu->fmt);
 		}
-		kakadu->codestream = 
+		jpx_codestream_source codestream = 
 			kakadu->source->access_codestream(kakadu->stream_id);
-		kakadu->palette = kakadu->codestream.access_palette();
+		kakadu->palette = codestream.access_palette();
 
 #ifdef DEBUG
 		printf("  source.get_metadata_memory() = %lld\n", 
@@ -686,6 +694,90 @@ vips_foreign_load_kakadu_generate_tiled(VipsRegion *out,
 		r->left, r->top, r->width, r->height);
 #endif /*DEBUG_VERBOSE*/
 
+	/* jp2k tiles get smaller with the layer size.
+	 */
+	int tile_width = VIPS_ROUND_UINT(
+		(double) jp2k->info->tdx / jp2k->shrink);
+	int tile_height = VIPS_ROUND_UINT(
+		(double) jp2k->info->tdy / jp2k->shrink);
+
+	/* ... so tiles_across is always the same.
+	 */
+	int tiles_across = jp2k->info->tw;
+
+	int x, y, z;
+
+	y = 0;
+	while (y < r->height) {
+		VipsRect tile, hit;
+
+		/* Not necessary, but it stops static analyzers complaining
+		 * about a used-before-set.
+		 */
+		hit.height = 0;
+
+		x = 0;
+		while (x < r->width) {
+			/* Tile the xy falls in, in tile numbers.
+			 */
+			int tx = (r->left + x) / tile_width;
+			int ty = (r->top + y) / tile_height;
+
+			/* Pixel coordinates of the tile that xy falls in.
+			 */
+			int xs = tx * tile_width;
+			int ys = ty * tile_height;
+
+			int tile_index = ty * tiles_across + tx;
+
+			/* Fetch the tile.
+			 */
+#ifdef DEBUG_VERBOSE
+			printf("   fetch tile %d\n", tile_index);
+#endif /*DEBUG_VERBOSE*/
+			if (!opj_get_decoded_tile(jp2k->codec,
+					jp2k->stream, jp2k->image, tile_index))
+				return -1;
+
+			/* Intersect tile with request to get pixels we need
+			 * to copy out.
+			 */
+			tile.left = xs;
+			tile.top = ys;
+			tile.width = tile_width;
+			tile.height = tile_height;
+			vips_rect_intersectrect(&tile, r, &hit);
+
+			/* Unpack hit pixels to buffer in vips layout.
+			 */
+			for (z = 0; z < hit.height; z++) {
+				VipsPel *q = VIPS_REGION_ADDR(out,
+					hit.left, hit.top + z);
+
+				vips_foreign_load_jp2k_pack(jp2k->upsample,
+					jp2k->image, out->im, q,
+					hit.left - tile.left,
+					hit.top - tile.top + z,
+					hit.width);
+
+				if (jp2k->ycc_to_rgb)
+					vips_foreign_load_jp2k_ycc_to_rgb(
+						jp2k->image, out->im, q,
+						hit.width);
+
+				vips_foreign_load_jp2k_ljust(jp2k->image,
+					out->im, q, hit.width);
+			}
+
+			x += hit.width;
+		}
+
+		/* This will be the same for all tiles in the row we've just
+		 * done.
+		 */
+		y += hit.height;
+	}
+
 	return 0;
 }
 
@@ -696,9 +788,9 @@ vips_foreign_load_kakadu_load(VipsForeignLoad *load)
 	VipsImage **t = (VipsImage **)
 		vips_object_local_array(VIPS_OBJECT(load), 3);
 
-	int vips_tile_width;
-	int vips_tile_height;
-	int vips_tiles_across;
+	int tile_width;
+	int tile_height;
+	int tiles_across;
 
 #ifdef DEBUG
 	printf("vips_foreign_load_kakadu_load:\n");
@@ -708,10 +800,15 @@ vips_foreign_load_kakadu_load(VipsForeignLoad *load)
 	if (vips_foreign_load_kakadu_set_header(kakadu, t[0]))
 		return -1;
 
-	// fix this
-	vips_tile_width = 512;
-	vips_tile_height = 512;
-	vips_tiles_across = 10;
+	kakadu->codestream.create(kakadu->input);
+
+	// FIXME
+	// vips_foreign_load_kakadu_set_error_behaviour(kakadu);
+
+	kakadu->codestream.get_valid_tiles(kakadu->tile_indices);
+	tile_width = kakadu->tile_indicess.size.x;
+	tile_height = kakadu->tile_indicess.size.y;
+	tiles_across = t[0]->Xsize / tile_width;
 
 	if (vips_image_generate(t[0],
 		NULL, vips_foreign_load_kakadu_generate_tiled, NULL,
@@ -722,9 +819,9 @@ vips_foreign_load_kakadu_load(VipsForeignLoad *load)
 	 * rows, plus 50%.
 	 */
 	if (vips_tilecache(t[0], &t[1],
-		"tile_width", vips_tile_width,
-		"tile_height", vips_tile_height,
-		"max_tiles", 3 * vips_tiles_across,
+		"tile_width", tile_width,
+		"tile_height", tile_height,
+		"max_tiles", 3 * tiles_across,
 		NULL))
 		return -1;
 

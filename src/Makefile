@@ -4,7 +4,7 @@
 OBJS = kakadu-vips.o kakaduload.o
 
 # source files
-SRC = $(BASEOBJS:.o=.cpp) 
+SRC = $(OBJS:.o=.cpp) 
 
 # headers
 HEADERS = kakadu.h
@@ -19,16 +19,13 @@ CXXFLAGS += -shared -fPIC
 CPPFLAGS += `pkg-config vips --cflags`
 LDFLAGS += `pkg-config vips --libs`
 
-# find kakadu headers and lib
+# find kakadu headers and libs ... use the static libs to make install
+# easier
 KAKADUHOME = $(shell echo ../kakadu/v* | sed 's/ /\n/g' | grep -v .zip)
 KAKADU_ARCH = Linux-x86-64-gcc
-KAKADU_VERSION = 83R
-KAKADU_LIB = kdu_v$(KAKADU_VERSION)
-KAKADU_AUX_LIB = kdu_a$(KAKADU_VERSION)
 CPPFLAGS += -I$(KAKADUHOME)/coresys/common 
 CPPFLAGS += -I$(KAKADUHOME)/managed/all_includes
-LDFLAGS += -L$(KAKADUHOME)/lib/$(KAKADU_ARCH)
-LDFLAGS += -l$(KAKADU_LIB) -l$(KAKADU_AUX_LIB)
+LDFLAGS += -L$(KAKADUHOME)/lib/$(KAKADU_ARCH) -lkdu -lkdu_aux
 
 OUT = vips-kakadu.so
 
