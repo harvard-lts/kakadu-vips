@@ -25,10 +25,12 @@ KAKADUHOME = $(shell echo ../kakadu/v* | sed 's/ /\n/g' | grep -v .zip)
 KAKADU_ARCH = Linux-x86-64-gcc
 CPPFLAGS += -I$(KAKADUHOME)/coresys/common 
 CPPFLAGS += -I$(KAKADUHOME)/managed/all_includes
-LDFLAGS += -L$(KAKADUHOME)/lib/$(KAKADU_ARCH) -lkdu -lkdu_aux
+LDFLAGS += $(KAKADUHOME)/lib/$(KAKADU_ARCH)/libkdu_aux.a
+LDFLAGS += $(KAKADUHOME)/lib/$(KAKADU_ARCH)/libkdu.a
 
 OUT = vips-kakadu.so
 
+all: $(OUT)
 release: $(OUT)
 debug: $(OUT)
 
