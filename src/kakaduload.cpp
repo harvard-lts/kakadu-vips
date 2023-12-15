@@ -2,9 +2,9 @@
  */
 
 /*
- */
 #define DEBUG_VERBOSE
 #define DEBUG
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,12 +50,13 @@ public:
 
 	virtual bool seek(kdu_long offset)
 	{
-		int result = vips_source_seek(source, offset, SEEK_SET);
 #ifdef DEBUG_VERBOSE
-		printf("VipsKakaduSource: seek(%lld) == %d\n", offset, result);
+		printf("VipsKakaduSource: seek(%lld)\n", offset);
 #endif /*DEBUG_VERBOSE*/
 
 		// kakadu assumes this will always succeed
+		(void) vips_source_seek(source, offset, SEEK_SET);
+
 		return true;
 	}
 
@@ -129,8 +130,8 @@ typedef struct _VipsForeignLoadKakadu {
 	/* For detailed parsing.
 	 */
 	kdu_codestream codestream;
-	kdu_channel_mapping channel_mapping;
-	kdu_dims rendered_image_dimensions;
+	int *channel_offsets;
+	kdu_channel_mapping *channel_mapping;
 	kdu_region_decompressor *region_decompressor;
 
 	/* Detected image properties.
@@ -197,9 +198,13 @@ vips_foreign_load_kakadu_dispose(GObject *gobject)
 	printf("vips_foreign_load_kakadu_dispose:\n");
 #endif /*DEBUG*/
 
+	DELETE(kakadu->channel_mapping);
+	DELETE(kakadu->region_decompressor);
 	DELETE(kakadu->input);
 	DELETE(kakadu->source);
 	DELETE(kakadu->kakadu_source);
+
+	VIPS_FREE(kakadu->channel_offsets);
 
 	VIPS_UNREF(kakadu->vips_source);
 
@@ -209,49 +214,11 @@ vips_foreign_load_kakadu_dispose(GObject *gobject)
 static int
 vips_foreign_load_kakadu_build(VipsObject *object)
 {
-	VipsObjectClass *klass = VIPS_OBJECT_GET_CLASS(object);
 	VipsForeignLoadKakadu *kakadu = (VipsForeignLoadKakadu *) object;
 
 #ifdef DEBUG
 	printf("vips_foreign_load_kakadu_build:\n");
 #endif /*DEBUG*/
-
-/*
-class kdu_stream_message : public kdu_thread_safe_message {
-  public: // Member classes
-	kdu_stream_message(std::ostream *stream)
-	  { this->stream = stream; }
-	void put_text(const char *string)
-	  { (*stream) << string; }
-	void flush(bool end_of_message=false)
-	  { stream->flush();
-		kdu_thread_safe_message::flush(end_of_message); }
-  private: // Data
-	std::ostream *stream;
-};
-
-static kdu_stream_message cout_message(&std::cout);
-static kdu_stream_message cerr_message(&std::cerr);
-static kdu_message_formatter pretty_cout(&cout_message);
-static kdu_message_formatter pretty_cerr(&cerr_message);
- */
-
-	/* Default parameters.
-	kakadu->parameters.decod_format = -1;
-	kakadu->parameters.cod_format = -1;
-	opj_set_default_decoder_parameters(&kakadu->parameters);
-	 */
-
-	/* Link the openjpeg stream to our VipsSource.
-	if (kakadu->source) {
-		kakadu->stream = vips_foreign_load_kakadu_stream(kakadu->source);
-		if (!kakadu->stream) {
-			vips_error(class->nickname,
-				"%s", _("unable to create kakadu stream"));
-			return -1;
-		}
-	}
-	 */
 
 	kakadu->kakadu_source = new VipsKakaduSource(kakadu->vips_source);
 
@@ -313,8 +280,6 @@ static int
 vips_foreign_load_kakadu_set_header(VipsForeignLoadKakadu *kakadu, 
 	VipsImage *out)
 {
-	VipsObjectClass *klass = VIPS_OBJECT_GET_CLASS(kakadu);
-
 #ifdef DEBUG
 	printf("vips_foreign_load_kakadu_set_header:\n");
 #endif /*DEBUG*/
@@ -338,7 +303,7 @@ vips_foreign_load_kakadu_set_header(VipsForeignLoadKakadu *kakadu,
 
 	int num_bytes;
 	const kdu_byte *data = kakadu->colour.get_icc_profile(&num_bytes);
-	if (num_bytes > 0)
+	if (data && num_bytes > 0)
 		vips_image_set_blob_copy(out, VIPS_META_ICC_NAME, data, num_bytes);
 
 	// FIXME ... many page images not done yet ... or we use this for
@@ -514,9 +479,7 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 	kakadu->kakadu_source->rewind();
 
 	kakadu->input->open(kakadu->kakadu_source);
-	int result = kakadu->source->open(kakadu->input, true);
-	printf("vips_foreign_load_kakadu_header: open() = %d\n", result);
-	if (result <= 0) {
+	if (kakadu->source->open(kakadu->input, true) <= 0) {
 		vips_error(klass->nickname,
 			"%s", _("raw codec load not implemented"));
 		return -1;
@@ -636,7 +599,9 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 	kakadu->yres = kakadu->resolution.get_resolution() / 1000.0;
 	kakadu->xres = kakadu->yres * kakadu->resolution.get_aspect_ratio();
 
+#ifdef DEBUG
 	vips_foreign_load_kakadu_print(kakadu);
+#endif /*DEBUG*/
 
 	if (vips_foreign_load_kakadu_set_header(kakadu, load->out))
 		return -1;
@@ -648,10 +613,11 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 }
 
 static int
-vips_foreign_load_kakadu_generate_tiled(VipsRegion *out,
+vips_foreign_load_kakadu_generate(VipsRegion *out,
 	void *seq, void *a, void *b, gboolean *stop)
 {
 	VipsForeignLoad *load = (VipsForeignLoad *) a;
+	VipsObjectClass *klass = VIPS_OBJECT_GET_CLASS(load);
 	VipsForeignLoadKakadu *kakadu = (VipsForeignLoadKakadu *) load;
 	VipsRect *r = &out->valid;
 
@@ -667,37 +633,35 @@ vips_foreign_load_kakadu_generate_tiled(VipsRegion *out,
 
 	if (!kakadu->region_decompressor->start(
 			kakadu->codestream,
-			&kakadu->channel_mapping,
+			kakadu->channel_mapping,
 			-1, 				// int single_component
 			0,					// int discard_levels 
 			100,				// int max_layers
 			tile_position,		// kdu_dims region
 			kdu_coords(1, 1))) {// kdu_coords expand_numerator
-		printf("vips_foreign_load_kakadu_generate_tiled: start failed!\n");
+		vips_error(klass->nickname, "%s", "start failed");
 		return -1;
 	}
-
-	int channel_offsets[3] = {0, 1, 2};
 
 	kdu_dims incomplete_region = tile_position;
 	kdu_dims new_region;
 
 	if (!kakadu->region_decompressor->process(
 			(kdu_byte *) VIPS_REGION_ADDR(out, r->left, r->top),
-			(int *) &channel_offsets,
+			kakadu->channel_offsets,
 			kakadu->bands, 				// int pixel_gap, 
 			kdu_coords(0, 0),			// kdu_coords buffer_origin, 
 			0, 							// int row_gap, 
 			0, 							// int suggested_increment, 
-			100000,						// int max_region_pixels, 
+			r->width * r->height,		// int max_region_pixels, 
 			incomplete_region,
 			new_region)) {
-		printf("vips_foreign_load_kakadu_generate_tiled: process failed!\n");
+		vips_error(klass->nickname, "%s", "process failed");
 		return -1;
 	}
 
 	if (!kakadu->region_decompressor->finish()) {
-		printf("vips_foreign_load_kakadu_generate_tiled: finish failed!\n");
+		vips_error(klass->nickname, "%s", "finish failed");
 		return -1;
 	}
 
@@ -712,8 +676,8 @@ vips_foreign_load_kakadu_load(VipsForeignLoad *load)
 		vips_object_local_array(VIPS_OBJECT(load), 3);
 
 #ifdef DEBUG
-#endif /*DEBUG*/
 	printf("vips_foreign_load_kakadu_load:\n");
+#endif /*DEBUG*/
 
 	t[0] = vips_image_new();
 	if (vips_foreign_load_kakadu_set_header(kakadu, t[0]))
@@ -721,30 +685,22 @@ vips_foreign_load_kakadu_load(VipsForeignLoad *load)
 
 	// grab all channels
 	// FIXME this won't work well for multispectral data
-	kakadu->channel_mapping.configure(
+	kakadu->channel_mapping = new kdu_channel_mapping();
+	kakadu->channel_mapping->configure(
 			kakadu->colour,
 			kakadu->channels,
 			0,						// int codestream_idx
 			kakadu->palette,
 			kakadu->dimensions);
 
+	kakadu->channel_offsets = VIPS_ARRAY(NULL, kakadu->bands, int);
+	for (int i = 0; i < kakadu->bands; i++) 
+		kakadu->channel_offsets[i] = i;
+
 	kakadu->region_decompressor = new kdu_region_decompressor();
 
-	kakadu->rendered_image_dimensions = 
-		kakadu->region_decompressor->get_rendered_image_dims(
-				kakadu->codestream,
-				&kakadu->channel_mapping,
-				-1, 				// int single_component, ... not used
-				0, 					// int discard_levels
-				kdu_coords(1, 1));	// expand_numerator
-
-	printf("kakadu->rendered_image_dimensions.size.x = %d\n", 
-			kakadu->rendered_image_dimensions.size.x);
-	printf("kakadu->rendered_image_dimensions.size.y = %d\n", 
-			kakadu->rendered_image_dimensions.size.y);
-
 	if (vips_image_generate(t[0],
-		NULL, vips_foreign_load_kakadu_generate_tiled, NULL,
+		NULL, vips_foreign_load_kakadu_generate, NULL,
 		kakadu, NULL))
 		return -1;
 
