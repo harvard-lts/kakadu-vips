@@ -41,6 +41,8 @@ python etc.
 
 - palettised images should work, but need testing
 
+- chroma subsampling should work, but needs testing
+
 - multispectral images should work, but need testing
 
 - implement `kakadusave`
