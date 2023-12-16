@@ -39,6 +39,8 @@ python etc.
 
 - cmyk, lab and greyscale should work, but need testing
 
+- palettised images should work, but need testing
+
 - multispectral images should work, but need testing
 
 - implement `kakadusave`
