@@ -27,6 +27,20 @@ vips kakaduload ~/pics/k2.jp2 x.jpg
 to load a jpeg2000  image and save as a regular jpeg. It should also run from 
 python etc.
 
+## Threading
+
+This branch uses the kakadiu threading, but fails because it requires you to
+kake all start/process/finish calls from a single thread, which libvips can't
+do.
+
+It typically fails with:
+
+```
+$ vips kakaduload ~/pics/k2.jp2 x.v
+vips: ../threads/kdu_threads.cpp:4744: virtual void kdu_core::kdu_thread_context::enter_group(kdu_core::kdu_thread_entity*): Assertion `(group == NULL) && caller->exists()' failed.
+Aborted (core dumped)
+```
+
 ## TODO
 
 - threaded load (it's all single-threaded for now)

@@ -127,12 +127,20 @@ typedef struct _VipsForeignLoadKakadu {
 	kdu_coords layer_size;
 	jp2_dimensions dimensions;
 
-	/* For detailed parsing.
+	/* Needed during tile generation.
 	 */
 	kdu_codestream codestream;
 	int *channel_offsets;
 	kdu_channel_mapping *channel_mapping;
 	kdu_region_decompressor *region_decompressor;
+	kdu_thread_env *threads;
+
+	/* kakadu colour mapping.
+	 */
+	int cmp;
+	int lut;
+	int stream_id;
+	int fmt;
 
 	/* Detected image properties.
 	 */
@@ -145,31 +153,10 @@ typedef struct _VipsForeignLoadKakadu {
 	double xres;
 	double yres;
 
-	/* Tile geometry.
-	 */
-	int tile_width;
-	int tile_height;
-	int tiles_across;
-
-	/* kakadu colour mapping.
-	 */
-	int cmp;
-	int lut;
-	int stream_id;
-	int fmt;
-
 	/* Number of errors reported during load -- use this to block load of
 	 * corrupted images.
 	 */
 	int n_errors;
-
-	/* If we need to upsample tiles read from opj.
-	 */
-	gboolean upsample;
-
-	/* If we need to do ycc->rgb conversion on load.
-	 */
-	gboolean ycc_to_rgb;
 } VipsForeignLoadKakadu;
 
 typedef VipsForeignLoadClass VipsForeignLoadKakaduClass;
@@ -203,6 +190,7 @@ vips_foreign_load_kakadu_dispose(GObject *gobject)
 	DELETE(kakadu->input);
 	DELETE(kakadu->source);
 	DELETE(kakadu->kakadu_source);
+	DELETE(kakadu->threads);
 
 	VIPS_FREE(kakadu->channel_offsets);
 
@@ -630,6 +618,8 @@ vips_foreign_load_kakadu_generate(VipsRegion *out,
 	kdu_dims tile_position;
 	tile_position.pos = kdu_coords(r->left, r->top);
 	tile_position.size = kdu_coords(r->width, r->height);
+	kdu_coords expand_numerator(1, 1);
+	kdu_coords expand_denominator(1, 1);
 
 	if (!kakadu->region_decompressor->start(
 			kakadu->codestream,
@@ -638,7 +628,12 @@ vips_foreign_load_kakadu_generate(VipsRegion *out,
 			0,					// int discard_levels 
 			100,				// int max_layers
 			tile_position,		// kdu_dims region
-			kdu_coords(1, 1))) {// kdu_coords expand_numerator
+			expand_numerator,	// kdu_coords expand_numerator
+			expand_denominator,	// kdu_coords expand_denominator
+			false,				// bool precise
+			KDU_WANT_OUTPUT_COMPONENTS, // kdu_component_access_mode am
+			false,				// bool fastest
+			kakadu->threads)) {	// kdu_thread_env *env
 		vips_error(klass->nickname, "%s", "start failed");
 		return -1;
 	}
@@ -699,10 +694,19 @@ vips_foreign_load_kakadu_load(VipsForeignLoad *load)
 
 	kakadu->region_decompressor = new kdu_region_decompressor();
 
+	kakadu->threads = new kdu_thread_env();
+	for (int i = 0; i < vips_concurrency_get(); i++)
+		kakadu->threads->add_thread();
+
 	if (vips_image_generate(t[0],
 		NULL, vips_foreign_load_kakadu_generate, NULL,
 		kakadu, NULL))
 		return -1;
+
+	// FIXME ... too small?
+	int tile_width = 256;
+	int tile_height = 256;
+	int tiles_across = VIPS_ROUND_UP(kakadu->width, tile_width) / tile_width;
 
 	/* Copy to out, adding a cache. Enough tiles for two complete
 	 * rows, plus 50%.
@@ -713,9 +717,9 @@ vips_foreign_load_kakadu_load(VipsForeignLoad *load)
 	 * access
 	 */
 	if (vips_tilecache(t[0], &t[1],
-		"tile_width", 256,
-		"tile_height", 256,
-		"max_tiles", 3 * kakadu->tiles_across,
+		"tile_width", tile_width,
+		"tile_height", tile_height,
+		"max_tiles", 3 * tiles_across,
 		NULL))
 		return -1;
 
