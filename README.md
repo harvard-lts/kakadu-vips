@@ -27,6 +27,16 @@ vips kakaduload ~/pics/k2.jp2 x.jpg
 to load a jpeg2000  image and save as a regular jpeg. It should also run from 
 python etc.
 
+
+## Threading
+
+This tries to use the libvips threading infrastructure. Unfortunately, each
+thread needs a complete copy of the input system, since the VipsSource
+contains state that can't be shared.
+
+We'll need something like vips_source_new_from_source() to clone a source in
+thread start.
+
 ## TODO
 
 - threaded load (it's all single-threaded for now)

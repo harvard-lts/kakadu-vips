@@ -132,7 +132,6 @@ typedef struct _VipsForeignLoadKakadu {
 	kdu_codestream codestream;
 	int *channel_offsets;
 	kdu_channel_mapping *channel_mapping;
-	kdu_region_decompressor *region_decompressor;
 
 	/* kakadu colour mapping.
 	 */
@@ -186,7 +185,6 @@ vips_foreign_load_kakadu_dispose(GObject *gobject)
 #endif /*DEBUG*/
 
 	DELETE(kakadu->channel_mapping);
-	DELETE(kakadu->region_decompressor);
 	DELETE(kakadu->input);
 	DELETE(kakadu->source);
 	DELETE(kakadu->kakadu_source);
@@ -599,11 +597,64 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 	return 0;
 }
 
+typedef struct _VipsForeignLoadKakaduState {
+	VipsForeignLoadKakadu *kakadu;
+
+
+	jp2_family_src *input;
+	jpx_source *source;
+	kdu_codestream codestream;
+	kdu_region_decompressor *region_decompressor;
+
+} VipsForeignLoadKakaduState;
+
+static void *
+vips_foreign_load_kakadu_start(VipsImage *out, void *a, void *b)
+{
+    VipsForeignLoadKakadu *kakadu = (VipsForeignLoadKakadu *) a;
+
+    VipsForeignLoadKakaduState *state;
+
+	if (!(state = VIPS_NEW(NULL, VipsForeignLoadKakaduState)))
+		return NULL;
+
+	state->kakadu = kakadu;
+
+	state->input->open(kakadu->kakadu_source);
+	if (kakadu->source->open(kakadu->input, true) <= 0) {
+		vips_error(klass->nickname,
+			"%s", _("raw codec load not implemented"));
+		return -1;
+	}
+
+	state->codestream_source = 
+		kakadu->source->access_codestream(kakadu->stream_id);
+	kdu_compressed_source *compressed_source = 
+		state->codestream_source.open_stream();
+	state->codestream.create(compressed_source);
+
+	state->region_decompressor = new kdu_region_decompressor();
+
+	return state;
+}
+
+static int
+vips_foreign_load_kakadu_stop(void *seq, void *a, void *b)
+{
+    VipsForeignLoadKakaduState *state = (VipsForeignLoadKakaduState *) seq;
+
+	DELETE(state->region_decompressor);
+	VIPS_FREE(state);
+
+    return 0;
+}
+
 static int
 vips_foreign_load_kakadu_generate(VipsRegion *out,
 	void *seq, void *a, void *b, gboolean *stop)
 {
 	VipsForeignLoad *load = (VipsForeignLoad *) a;
+	VipsForeignLoadKakaduState *state = (VipsForeignLoadKakaduState *) seq;
 	VipsObjectClass *klass = VIPS_OBJECT_GET_CLASS(load);
 	VipsForeignLoadKakadu *kakadu = (VipsForeignLoadKakadu *) load;
 	VipsRect *r = &out->valid;
@@ -618,7 +669,7 @@ vips_foreign_load_kakadu_generate(VipsRegion *out,
 	tile_position.pos = kdu_coords(r->left, r->top);
 	tile_position.size = kdu_coords(r->width, r->height);
 
-	if (!kakadu->region_decompressor->start(
+	if (!state->region_decompressor->start(
 			kakadu->codestream,
 			kakadu->channel_mapping,
 			-1, 				// int single_component
@@ -633,7 +684,7 @@ vips_foreign_load_kakadu_generate(VipsRegion *out,
 	kdu_dims incomplete_region = tile_position;
 	kdu_dims new_region;
 
-	if (!kakadu->region_decompressor->process(
+	if (!state->region_decompressor->process(
 			(kdu_byte *) VIPS_REGION_ADDR(out, r->left, r->top),
 			kakadu->channel_offsets,
 			kakadu->bands, 				// int pixel_gap, 
@@ -647,7 +698,7 @@ vips_foreign_load_kakadu_generate(VipsRegion *out,
 		return -1;
 	}
 
-	if (!kakadu->region_decompressor->finish()) {
+	if (!state->region_decompressor->finish()) {
 		vips_error(klass->nickname, "%s", "finish failed");
 		return -1;
 	}
@@ -684,10 +735,10 @@ vips_foreign_load_kakadu_load(VipsForeignLoad *load)
 	for (int i = 0; i < kakadu->bands; i++) 
 		kakadu->channel_offsets[i] = i;
 
-	kakadu->region_decompressor = new kdu_region_decompressor();
-
 	if (vips_image_generate(t[0],
-		NULL, vips_foreign_load_kakadu_generate, NULL,
+		vips_foreign_load_kakadu_start, 
+		vips_foreign_load_kakadu_generate, 
+		vips_foreign_load_kakadu_stop,
 		kakadu, NULL))
 		return -1;
 
