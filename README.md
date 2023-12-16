@@ -20,40 +20,25 @@ This will copy `vips-kakadu.so` to your libvips module directory.
 
 Run with eg.:
 
+```shell
+vips kakaduload ~/pics/k2.jp2 x.jpg
 ```
-$ vips kakaduload
-load JPEG2000 image
-usage:
-   kakaduload filename out [--option-name option-value ...]
-where:
-   filename     - Filename to load from, input gchararray
-   out          - Output image, output VipsImage
-optional arguments:
-   page         - Load this page from the image, input gint
-			default: 0
-			min: 0, max: 100000
-   flags        - Flags for this file, output VipsForeignFlags
-			default flags: 
-			allowed flags: none, partial, bigendian, sequential, all
-   memory       - Force open via memory, input gboolean
-			default: false
-   access       - Required access pattern for this file, input VipsAccess
-			default enum: random
-			allowed enums: random, sequential, sequential-unbuffered
-   fail-on      - Error level to fail on, input VipsFailOn
-			default enum: none
-			allowed enums: none, truncated, error, warning
-   revalidate   - Don't use a cached result for this operation, input gboolean
-			default: false
-operation flags: untrusted 
-$ vips kakaduload k2.jp2 x.v
-vips_foreign_load_kakadu_build:
-vips_foreign_load_kakadu_header:
-vips_foreign_load_kakadu_set_header:
-vips_foreign_load_kakadu_load:
-vips_foreign_load_kakadu_set_header:
-vips_foreign_load_kakadu_dispose:
-vips_image_generate: demand hint not set
-memory: high-water mark 216 bytes
-error buffer: vips_image_generate: demand hint not set
-```
+
+to load a jpeg2000  image and save as a regular jpeg. It should also run from 
+python etc.
+
+## TODO
+
+- threaded load (it's all single-threaded for now)
+
+- implement shrink-on-load via the page parameter
+
+- 16 bit and float images should work, but need testing
+
+- alpha images should work, but need testing
+
+- cmyk, lab and greyscale should work, but need testing
+
+- multispectral images should work, but need testing
+
+- implement `kakadusave`
