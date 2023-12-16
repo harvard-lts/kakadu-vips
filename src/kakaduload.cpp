@@ -134,6 +134,13 @@ typedef struct _VipsForeignLoadKakadu {
 	kdu_channel_mapping *channel_mapping;
 	kdu_region_decompressor *region_decompressor;
 
+	/* kakadu colour mapping.
+	 */
+	int cmp;
+	int lut;
+	int stream_id;
+	int fmt;
+
 	/* Detected image properties.
 	 */
 	int width;
@@ -145,31 +152,11 @@ typedef struct _VipsForeignLoadKakadu {
 	double xres;
 	double yres;
 
-	/* Tile geometry.
-	 */
-	int tile_width;
-	int tile_height;
-	int tiles_across;
-
-	/* kakadu colour mapping.
-	 */
-	int cmp;
-	int lut;
-	int stream_id;
-	int fmt;
-
 	/* Number of errors reported during load -- use this to block load of
 	 * corrupted images.
 	 */
 	int n_errors;
 
-	/* If we need to upsample tiles read from opj.
-	 */
-	gboolean upsample;
-
-	/* If we need to do ycc->rgb conversion on load.
-	 */
-	gboolean ycc_to_rgb;
 } VipsForeignLoadKakadu;
 
 typedef VipsForeignLoadClass VipsForeignLoadKakaduClass;
@@ -704,6 +691,12 @@ vips_foreign_load_kakadu_load(VipsForeignLoad *load)
 		kakadu, NULL))
 		return -1;
 
+	// too small? test
+	// FIXME .. derive settings from image
+	int tile_width = 256;
+	int tile_height = 256;
+	int tiles_across = VIPS_ROUND_UP(kakadu->width, tile_width) / tile_width;
+
 	/* Copy to out, adding a cache. Enough tiles for two complete
 	 * rows, plus 50%.
 	 *
@@ -713,9 +706,9 @@ vips_foreign_load_kakadu_load(VipsForeignLoad *load)
 	 * access
 	 */
 	if (vips_tilecache(t[0], &t[1],
-		"tile_width", 256,
-		"tile_height", 256,
-		"max_tiles", 3 * kakadu->tiles_across,
+		"tile_width", tile_width,
+		"tile_height", tile_height,
+		"max_tiles", 3 * tiles_across,
 		NULL))
 		return -1;
 
