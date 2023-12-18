@@ -641,7 +641,7 @@ vips_foreign_load_kakadu_generate(VipsRegion *out,
 			kakadu->channel_mapping,
 			-1, 				// int single_component
 			0,					// int discard_levels 
-			100,				// int max_layers
+			1000,				// int max_layers
 			tile_position,		// kdu_dims region
 			expand_numerator,	// kdu_coords expand_numerator
 			expand_denominator,	// kdu_coords expand_denominator
@@ -655,20 +655,17 @@ vips_foreign_load_kakadu_generate(VipsRegion *out,
 
 	kdu_dims incomplete_region = tile_position;
 	kdu_dims new_region;
-
-	if (!kakadu->region_decompressor->process(
+	while (kakadu->region_decompressor->process(
 			(kdu_byte *) VIPS_REGION_ADDR(out, r->left, r->top),
 			kakadu->channel_offsets,
 			kakadu->bands, 				// int pixel_gap, 
 			kdu_coords(0, 0),			// kdu_coords buffer_origin, 
 			0, 							// int row_gap, 
 			0, 							// int suggested_increment, 
-			r->width * r->height,		// int max_region_pixels, 
+			1000000000,					// int max_region_pixels, 
 			incomplete_region,
-			new_region)) {
-		vips_error(klass->nickname, "%s", "process failed");
-		return -1;
-	}
+			new_region))
+			;
 
 	if (!kakadu->region_decompressor->finish()) {
 		vips_error(klass->nickname, "%s", "finish failed");
@@ -717,13 +714,12 @@ vips_foreign_load_kakadu_load(VipsForeignLoad *load)
 	// FIXME .. derive settings from image, though we will need pretty large
 	// tiles to hide per tile threadgroup create 
 	// on this PC, 
-	// 256x256 == 5.7s
-	// 512x512 == 2.3s, 
-	// 1024x1024 = 1.4s
-	// 2048x2048 = 0.9s
-	// 4096x4096 = 0.8s
-	int tile_width = 2048;
-	int tile_height = 2048;
+	// 256x256 == 5.4s
+	// 512x512 == 2.2s
+	// larger tiles fail to decode properly for some reason I don't 
+	// understand
+	int tile_width = 512;
+	int tile_height = 512;
 	int tiles_across = VIPS_ROUND_UP(kakadu->width, tile_width) / tile_width;
 
 	/* Copy to out, adding a cache. Enough tiles for two complete
