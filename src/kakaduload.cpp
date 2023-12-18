@@ -133,7 +133,6 @@ typedef struct _VipsForeignLoadKakadu {
 	int *channel_offsets;
 	kdu_channel_mapping *channel_mapping;
 	kdu_region_decompressor *region_decompressor;
-	kdu_thread_env *threads;
 
 	/* kakadu colour mapping.
 	 */
@@ -190,7 +189,6 @@ vips_foreign_load_kakadu_dispose(GObject *gobject)
 	DELETE(kakadu->input);
 	DELETE(kakadu->source);
 	DELETE(kakadu->kakadu_source);
-	DELETE(kakadu->threads);
 
 	VIPS_FREE(kakadu->channel_offsets);
 
@@ -615,6 +613,19 @@ vips_foreign_load_kakadu_generate(VipsRegion *out,
 		r->left, r->top, r->width, r->height);
 #endif /*DEBUG_VERBOSE*/
 
+	// we can't reuse this between libvips workers, unfortunately, since
+	// region_decompressor needs the calling thread to always be the same,
+	// which libvips can't guarantee
+	//
+	// we have to create and destroy thread_env for each tile
+	kdu_thread_env env;
+	env.create();
+	for (int i = 0; i < vips_concurrency_get(); i++)
+		if (!env.add_thread()) {
+			vips_error(klass->nickname, "%s", "thread create failed");
+			return -1;
+		}
+
 	kdu_dims tile_position;
 	tile_position.pos = kdu_coords(r->left, r->top);
 	tile_position.size = kdu_coords(r->width, r->height);
@@ -633,7 +644,7 @@ vips_foreign_load_kakadu_generate(VipsRegion *out,
 			false,				// bool precise
 			KDU_WANT_OUTPUT_COMPONENTS, // kdu_component_access_mode am
 			false,				// bool fastest
-			kakadu->threads)) {	// kdu_thread_env *env
+			&env)) {			// kdu_thread_env *env
 		vips_error(klass->nickname, "%s", "start failed");
 		return -1;
 	}
@@ -694,18 +705,14 @@ vips_foreign_load_kakadu_load(VipsForeignLoad *load)
 
 	kakadu->region_decompressor = new kdu_region_decompressor();
 
-	kakadu->threads = new kdu_thread_env();
-	for (int i = 0; i < vips_concurrency_get(); i++)
-		kakadu->threads->add_thread();
-
 	if (vips_image_generate(t[0],
 		NULL, vips_foreign_load_kakadu_generate, NULL,
 		kakadu, NULL))
 		return -1;
 
 	// FIXME ... too small?
-	int tile_width = 256;
-	int tile_height = 256;
+	int tile_width = 512;
+	int tile_height = 512;
 	int tiles_across = VIPS_ROUND_UP(kakadu->width, tile_width) / tile_width;
 
 	/* Copy to out, adding a cache. Enough tiles for two complete
