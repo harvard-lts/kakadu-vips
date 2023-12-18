@@ -78,6 +78,11 @@ v8_3-02172N/coresys/common/kdu_utils.h
 
 `libkdu_v83R.so` means version 8.3, release mode.
 
+## Debugging
+
+You have to edit the makefiles for a debug build -- just change `-O2` to `-g`,
+then `make clean` and `make` again.
+
 ### TODO
 
 - `Compiling_Instructions.txt` talks about needing to define 
