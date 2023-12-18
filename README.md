@@ -29,8 +29,6 @@ python etc.
 
 ## TODO
 
-- threaded load (it's all single-threaded for now)
-
 - implement shrink-on-load via the page parameter
 
 - 16 bit and float images should work, but need testing

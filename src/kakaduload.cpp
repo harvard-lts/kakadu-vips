@@ -127,7 +127,7 @@ typedef struct _VipsForeignLoadKakadu {
 	kdu_coords layer_size;
 	jp2_dimensions dimensions;
 
-	/* For detailed parsing.
+	/* Needed during tile generation.
 	 */
 	kdu_codestream codestream;
 	int *channel_offsets;
@@ -156,7 +156,6 @@ typedef struct _VipsForeignLoadKakadu {
 	 * corrupted images.
 	 */
 	int n_errors;
-
 } VipsForeignLoadKakadu;
 
 typedef VipsForeignLoadClass VipsForeignLoadKakaduClass;
@@ -614,9 +613,28 @@ vips_foreign_load_kakadu_generate(VipsRegion *out,
 		r->left, r->top, r->width, r->height);
 #endif /*DEBUG_VERBOSE*/
 
+	// 16 seems like a sensible limit ... we want to avoid overcommitting
+	// thread resources if we can
+	int n_threads = VIPS_MIN(16, vips_concurrency_get());
+
+	// we can't reuse this between libvips workers, unfortunately, since
+	// region_decompressor needs the calling thread to always be the same,
+	// which libvips can't guarantee
+	//
+	// we have to create and destroy thread_env for each tile
+	kdu_thread_env env;
+	env.create();
+	for (int i = 0; i < n_threads; i++)
+		if (!env.add_thread()) {
+			vips_error(klass->nickname, "%s", "thread create failed");
+			return -1;
+		}
+
 	kdu_dims tile_position;
 	tile_position.pos = kdu_coords(r->left, r->top);
 	tile_position.size = kdu_coords(r->width, r->height);
+	kdu_coords expand_numerator(1, 1);
+	kdu_coords expand_denominator(1, 1);
 
 	if (!kakadu->region_decompressor->start(
 			kakadu->codestream,
@@ -625,7 +643,12 @@ vips_foreign_load_kakadu_generate(VipsRegion *out,
 			0,					// int discard_levels 
 			100,				// int max_layers
 			tile_position,		// kdu_dims region
-			kdu_coords(1, 1))) {// kdu_coords expand_numerator
+			expand_numerator,	// kdu_coords expand_numerator
+			expand_denominator,	// kdu_coords expand_denominator
+			false,				// bool precise
+			KDU_WANT_OUTPUT_COMPONENTS, // kdu_component_access_mode am
+			false,				// bool fastest
+			&env)) {			// kdu_thread_env *env
 		vips_error(klass->nickname, "%s", "start failed");
 		return -1;
 	}
@@ -691,10 +714,16 @@ vips_foreign_load_kakadu_load(VipsForeignLoad *load)
 		kakadu, NULL))
 		return -1;
 
-	// too small? test
-	// FIXME .. derive settings from image
-	int tile_width = 256;
-	int tile_height = 256;
+	// FIXME .. derive settings from image, though we will need pretty large
+	// tiles to hide per tile threadgroup create 
+	// on this PC, 
+	// 256x256 == 5.7s
+	// 512x512 == 2.3s, 
+	// 1024x1024 = 1.4s
+	// 2048x2048 = 0.9s
+	// 4096x4096 = 0.8s
+	int tile_width = 2048;
+	int tile_height = 2048;
 	int tiles_across = VIPS_ROUND_UP(kakadu->width, tile_width) / tile_width;
 
 	/* Copy to out, adding a cache. Enough tiles for two complete
