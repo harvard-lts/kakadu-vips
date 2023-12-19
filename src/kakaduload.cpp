@@ -12,11 +12,9 @@
 
 #include <vips/vips.h>
 
-#include <jp2.h>
-#include <jpx.h>
-#include <kdu_region_decompressor.h>
+#include "kakadu.h"
 
-#include <iostream>
+#include <kdu_region_decompressor.h>
 
 using namespace kdu_supp; // includes the core namespace
 
@@ -95,6 +93,14 @@ private:
 	VipsSource *source;
 };
 
+static VipsForeignKakaduError vips_foreign_kakadu_error;
+static VipsForeignKakaduWarn vips_foreign_kakadu_warn;
+
+kdu_message_formatter 
+	vips_foreign_kakadu_error_handler(&vips_foreign_kakadu_error);
+kdu_message_formatter 
+	vips_foreign_kakadu_warn_handler(&vips_foreign_kakadu_warn);
+
 typedef struct _VipsForeignLoadKakadu {
 	VipsForeignLoad parent_object;
 
@@ -158,22 +164,24 @@ typedef struct _VipsForeignLoadKakadu {
 	int n_errors;
 } VipsForeignLoadKakadu;
 
+class kdu_stream_message : public kdu_message {
+  public: // Member classes
+    kdu_stream_message(std::ostream *stream)
+      { this->stream = stream; }
+    void put_text(const char *string)
+      { (*stream) << string; }
+    void flush(bool end_of_message=false)
+      { stream->flush(); }
+  private: // Data
+    std::ostream *stream;
+  };
+
 typedef VipsForeignLoadClass VipsForeignLoadKakaduClass;
 
 extern "C" {
 	G_DEFINE_ABSTRACT_TYPE(VipsForeignLoadKakadu, vips_foreign_load_kakadu,
 		VIPS_TYPE_FOREIGN_LOAD);
 }
-
-#define DELETE(P) \
-G_STMT_START \
-    { \
-        if (P) { \
-            delete (P); \
-            (P) = NULL; \
-        } \
-    } \
-G_STMT_END
 
 static void
 vips_foreign_load_kakadu_dispose(GObject *gobject)
@@ -205,6 +213,10 @@ vips_foreign_load_kakadu_build(VipsObject *object)
 #ifdef DEBUG
 	printf("vips_foreign_load_kakadu_build:\n");
 #endif /*DEBUG*/
+
+	// install error and warn messages
+	kdu_customize_errors(&vips_foreign_kakadu_error_handler);
+	kdu_customize_warnings(&vips_foreign_kakadu_warn_handler);
 
 	kakadu->kakadu_source = new VipsKakaduSource(kakadu->vips_source);
 
