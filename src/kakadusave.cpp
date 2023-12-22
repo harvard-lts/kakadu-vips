@@ -6,16 +6,6 @@
 #define DEBUG
  */
 
-/* TODO
- *
- * - could support tiff-like depth parameter
- *
- * - could support png-like bitdepth parameter
- *
- * - could support cp_comment field? not very useful
- *
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +15,8 @@
 #include "kakadu.h"
 
 #include <kdu_stripe_compressor.h>
+
+using namespace kdu_supp; // includes the core namespace
 
 /* A VipsTarget as a Kakadu output object. This keeps the reference
  * alive while it's alive.
@@ -43,12 +35,12 @@ public:
 		printf("~VipsKakaduSource:\n");
 #endif /*DEBUG*/
 
-		VIPS_UNREF(source);
+		VIPS_UNREF(target);
 	}
 
 	int get_capabilities() 
 	{
-		// a sim0ple byte target
+		// a simple byte target
 		return KDU_TARGET_CAP_SEQUENTIAL;
 	}
 
@@ -101,6 +93,7 @@ typedef struct _VipsForeignSaveKakadu {
 
 	/* Encoder state.
 	 */
+	kdu_stripe_compressor *compressor;
 
 	/* The line of tiles we are building, and the buffer we
 	 * unpack to for output.
@@ -131,6 +124,7 @@ vips_foreign_save_kakadu_dispose(GObject *gobject)
 {
 	VipsForeignSaveKakadu *kakadu = (VipsForeignSaveKakadu *) gobject;
 
+	DELETE(kakadu->compressor);
 	DELETE(kakadu->kakadu_target);
 
 	VIPS_UNREF(kakadu->target);
@@ -143,48 +137,111 @@ vips_foreign_save_kakadu_dispose(GObject *gobject)
 }
 
 static int
+vips_foreign_save_kakadu_write_block(VipsRegion *region, VipsRect *area,
+    void *user)
+{
+    VipsForeignSaveKakadu *kakadu = (VipsForeignSaveKakadu *) user;
+	VipsRect *r = &region->valid;
+
+	// FIXME ... what are these three dimensions
+	int stripe_heights[3] = { r->height, r->height, r->height };
+
+	kakadu->compressor->push_stripe(VIPS_REGION_ADDR(region, r->left, r->top),
+			                        stripe_heights);
+
+	return 0;
+}
+
+static int
 vips_foreign_save_kakadu_build(VipsObject *object)
 {
-	VipsObjectClass *class = VIPS_OBJECT_GET_CLASS(object);
+	VipsObjectClass *klass = VIPS_OBJECT_GET_CLASS(object);
 	VipsForeignSave *save = (VipsForeignSave *) object;
 	VipsForeignSaveKakadu *kakadu = (VipsForeignSaveKakadu *) object;
 
-	size_t sizeof_tile;
-	size_t sizeof_line;
-	VipsRect strip_position;
+	VipsImage *image;
 
 	// install error and warn messages
 	kdu_customize_errors(&vips_foreign_kakadu_error_handler);
 	kdu_customize_warnings(&vips_foreign_kakadu_warn_handler);
 
-	if (VIPS_OBJECT_CLASS(vips_foreign_save_kakadu_parent_class)->build(object))
+	if (VIPS_OBJECT_CLASS(vips_foreign_save_kakadu_parent_class)->
+		build(object))
 		return -1;
 
-	if (!vips_band_format_isint(save->ready->BandFmt)) {
-		vips_error(class->nickname,
+	image = save->ready;
+
+	if (!vips_band_format_isint(image->BandFmt)) {
+		vips_error(klass->nickname,
 			"%s", _("not an integer format"));
 		return -1;
 	}
 
-	/* Write data.
-	 */
-	if (vips_sink_disc(save->ready,
-			vips_foreign_save_kakadu_write_block, kakadu))
+	siz_params siz;
+
+	siz.set(Scomponents, 0, 0, image->Bands);
+	siz.set(Sdims, 0, 0, image->Ysize);
+	siz.set(Sdims, 0, 1, image->Xsize);
+	siz.set(Sprecision, 0, 0, 
+			(int) (vips_format_sizeof(image->BandFmt) << 3));
+	siz.set(Ssigned, 0, 0, false);
+
+	// finalize to complete other fields ... has to be a reference
+	kdu_params *siz_ref = &siz; 
+	siz_ref->finalize();
+
+	// a kdu_compressed_target
+	kakadu->kakadu_target = new VipsKakaduTarget(kakadu->target);
+
+	// we want a jp2 writer
+	jp2_family_tgt target;
+	target.open(kakadu->kakadu_target);
+
+	// a jp2 image which will write to our target
+	jp2_target output;
+	output.open(&target);
+
+	// set image properties
+	jp2_dimensions dims = output.access_dimensions(); 
+	dims.init(&siz);
+	jp2_colour colr = output.access_colour();
+	colr.init((image->Bands == 3) ? JP2_sRGB_SPACE : JP2_sLUM_SPACE);
+
+	// serialise the image into a codestream
+	kdu_codestream codestream; 
+	codestream.create(&siz, &output);
+
+	codestream.access_siz()->parse_string("Clayers=12");
+	codestream.access_siz()->parse_string("Creversible=yes");
+
+	codestream.access_siz()->parse_string("Qfactor=85");
+	codestream.access_siz()->parse_string("Ctype=Y,Cb,Cr,N");
+
+	kakadu->compressor = new kdu_stripe_compressor();
+	kakadu->compressor->start(codestream);
+
+	if (vips_sink_disc(save->ready, 
+		vips_foreign_save_kakadu_write_block, kakadu))
 		return -1;
+
+	kakadu->compressor->finish();
 
 	if (vips_target_end(kakadu->target))
 		return -1;
+
+	codestream.destroy();
+	output.close();
 
 	return 0;
 }
 
 static void
-vips_foreign_save_kakadu_class_init(VipsForeignSaveKakaduClass *class)
+vips_foreign_save_kakadu_class_init(VipsForeignSaveKakaduClass *klass)
 {
-	GObjectClass *gobject_class = G_OBJECT_CLASS(class);
-	VipsObjectClass *object_class = (VipsObjectClass *) class;
-	VipsForeignClass *foreign_class = (VipsForeignClass *) class;
-	VipsForeignSaveClass *save_class = (VipsForeignSaveClass *) class;
+	GObjectClass *gobject_class = G_OBJECT_CLASS(klass);
+	VipsObjectClass *object_class = (VipsObjectClass *) klass;
+	VipsForeignClass *foreign_class = (VipsForeignClass *) klass;
+	VipsForeignSaveClass *save_class = (VipsForeignSaveClass *) klass;
 
 	gobject_class->dispose = vips_foreign_save_kakadu_dispose;
 	gobject_class->set_property = vips_object_set_property;
@@ -198,28 +255,28 @@ vips_foreign_save_kakadu_class_init(VipsForeignSaveKakaduClass *class)
 
 	save_class->saveable = VIPS_SAVEABLE_ANY;
 
-	VIPS_ARG_INT(class, "tile_width", 11,
+	VIPS_ARG_INT(klass, "tile_width", 11,
 		_("Tile width"),
 		_("Tile width in pixels"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveKakadu, tile_width),
 		1, 32768, 512);
 
-	VIPS_ARG_INT(class, "tile_height", 12,
+	VIPS_ARG_INT(klass, "tile_height", 12,
 		_("Tile height"),
 		_("Tile height in pixels"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveKakadu, tile_height),
 		1, 32768, 512);
 
-	VIPS_ARG_BOOL(class, "lossless", 13,
+	VIPS_ARG_BOOL(klass, "lossless", 13,
 		_("Lossless"),
 		_("Enable lossless compression"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveKakadu, lossless),
 		FALSE);
 
-	VIPS_ARG_ENUM(class, "subsample_mode", 19,
+	VIPS_ARG_ENUM(klass, "subsample_mode", 19,
 		_("Subsample mode"),
 		_("Select chroma subsample operation mode"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
@@ -227,7 +284,7 @@ vips_foreign_save_kakadu_class_init(VipsForeignSaveKakaduClass *class)
 		VIPS_TYPE_FOREIGN_SUBSAMPLE,
 		VIPS_FOREIGN_SUBSAMPLE_OFF);
 
-	VIPS_ARG_INT(class, "Q", 14,
+	VIPS_ARG_INT(klass, "Q", 14,
 		_("Q"),
 		_("Q factor"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
@@ -279,10 +336,11 @@ vips_foreign_save_kakadu_file_build(VipsObject *object)
 }
 
 static void
-vips_foreign_save_kakadu_file_class_init(VipsForeignSaveKakaduFileClass *class)
+vips_foreign_save_kakadu_file_class_init(
+	VipsForeignSaveKakaduFileClass *klass)
 {
-	GObjectClass *gobject_class = G_OBJECT_CLASS(class);
-	VipsObjectClass *object_class = (VipsObjectClass *) class;
+	GObjectClass *gobject_class = G_OBJECT_CLASS(klass);
+	VipsObjectClass *object_class = (VipsObjectClass *) klass;
 
 	gobject_class->set_property = vips_object_set_property;
 	gobject_class->get_property = vips_object_get_property;
@@ -290,7 +348,7 @@ vips_foreign_save_kakadu_file_class_init(VipsForeignSaveKakaduFileClass *class)
 	object_class->nickname = "kakadusave";
 	object_class->build = vips_foreign_save_kakadu_file_build;
 
-	VIPS_ARG_STRING(class, "filename", 1,
+	VIPS_ARG_STRING(klass, "filename", 1,
 		_("Filename"),
 		_("Filename to load from"),
 		VIPS_ARGUMENT_REQUIRED_INPUT,
@@ -342,10 +400,10 @@ vips_foreign_save_kakadu_buffer_build(VipsObject *object)
 
 static void
 vips_foreign_save_kakadu_buffer_class_init(
-	VipsForeignSaveKakaduBufferClass *class)
+	VipsForeignSaveKakaduBufferClass *klass)
 {
-	GObjectClass *gobject_class = G_OBJECT_CLASS(class);
-	VipsObjectClass *object_class = (VipsObjectClass *) class;
+	GObjectClass *gobject_class = G_OBJECT_CLASS(klass);
+	VipsObjectClass *object_class = (VipsObjectClass *) klass;
 
 	gobject_class->set_property = vips_object_set_property;
 	gobject_class->get_property = vips_object_get_property;
@@ -353,7 +411,7 @@ vips_foreign_save_kakadu_buffer_class_init(
 	object_class->nickname = "kakadusave_buffer";
 	object_class->build = vips_foreign_save_kakadu_buffer_build;
 
-	VIPS_ARG_BOXED(class, "buffer", 1,
+	VIPS_ARG_BOXED(klass, "buffer", 1,
 		_("Buffer"),
 		_("Buffer to save to"),
 		VIPS_ARGUMENT_REQUIRED_OUTPUT,
@@ -398,10 +456,10 @@ vips_foreign_save_kakadu_target_build(VipsObject *object)
 
 static void
 vips_foreign_save_kakadu_target_class_init(
-	VipsForeignSaveKakaduTargetClass *class)
+	VipsForeignSaveKakaduTargetClass *klass)
 {
-	GObjectClass *gobject_class = G_OBJECT_CLASS(class);
-	VipsObjectClass *object_class = (VipsObjectClass *) class;
+	GObjectClass *gobject_class = G_OBJECT_CLASS(klass);
+	VipsObjectClass *object_class = (VipsObjectClass *) klass;
 
 	gobject_class->set_property = vips_object_set_property;
 	gobject_class->get_property = vips_object_get_property;
@@ -409,7 +467,7 @@ vips_foreign_save_kakadu_target_class_init(
 	object_class->nickname = "kakadusave_target";
 	object_class->build = vips_foreign_save_kakadu_target_build;
 
-	VIPS_ARG_OBJECT(class, "target", 1,
+	VIPS_ARG_OBJECT(klass, "target", 1,
 		_("Target"),
 		_("Target to save to"),
 		VIPS_ARGUMENT_REQUIRED_INPUT,

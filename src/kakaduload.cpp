@@ -18,9 +18,6 @@
 
 using namespace kdu_supp; // includes the core namespace
 
-// i18n placeholder
-#define _(S) (S)
-
 /* A VipsSource as a Kakadu input object. This keeps the reference
  * alive while it's alive.
  */

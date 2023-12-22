@@ -1,7 +1,7 @@
 # Makefile for vips plugin 
 
 # object files
-OBJS = kakadu-vips.o kakaduload.o
+OBJS = kakadu-vips.o kakaduload.o kakadusave.o
 
 # source files
 SRC = $(OBJS:.o=.cpp) 

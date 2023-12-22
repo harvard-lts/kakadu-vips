@@ -18,6 +18,9 @@
 #include <kdu_utils.h>
 #include <kdu_file_io.h>
 
+// i18n placeholder
+#define _(S) (S)
+
 #define DELETE(P) \
 G_STMT_START \
     { \
@@ -27,6 +30,8 @@ G_STMT_START \
         } \
     } \
 G_STMT_END
+
+extern const char *vips__kakadu_suffs[];
 
 // object init
 extern "C" {
