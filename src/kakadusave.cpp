@@ -2,9 +2,9 @@
  */
 
 /*
+ */
 #define DEBUG_VERBOSE
 #define DEBUG
- */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +25,9 @@ class VipsKakaduTarget : public kdu_compressed_target {
 public:
 	VipsKakaduTarget(VipsTarget *_target)
 	{
+#ifdef DEBUG
+		printf("new VipsKakaduTarget:\n");
+#endif /*DEBUG*/
 		target = _target;
 		g_object_ref(target);
 	}
@@ -32,7 +35,7 @@ public:
 	~VipsKakaduTarget()
 	{
 #ifdef DEBUG
-		printf("~VipsKakaduSource:\n");
+		printf("~VipsKakaduTarget:\n");
 #endif /*DEBUG*/
 
 		VIPS_UNREF(target);
@@ -46,6 +49,9 @@ public:
 
 	bool write(const kdu_byte *buf, int num_bytes)
 	{
+#ifdef DEBUG_VERBOSE
+		printf("VipsKakaduTarget: write %d bytes ...\n", num_bytes);
+#endif /*DEBUG_VERBOSE*/
 		gint64 bytes_written = vips_target_write(target, buf, num_bytes);
 
 		return bytes_written == num_bytes;
@@ -54,7 +60,7 @@ public:
 	virtual bool close()
 	{
 #ifdef DEBUG
-		printf("VipsKakaduSource: close()\n");
+		printf("VipsKakaduTarget: close()\n");
 #endif /*DEBUG*/
 
 		VIPS_UNREF(target);
@@ -143,11 +149,22 @@ vips_foreign_save_kakadu_write_block(VipsRegion *region, VipsRect *area,
     VipsForeignSaveKakadu *kakadu = (VipsForeignSaveKakadu *) user;
 	VipsRect *r = &region->valid;
 
-	// FIXME ... what are these three dimensions
+#ifdef DEBUG_VERBOSE
+	printf("vips_foreign_save_kakadu_write_block: "
+		   "left = %d, top = %d, width = %d, height = %d\n",
+		r->left, r->top, r->width, r->height);
+#endif /*DEBUG_VERBOSE*/
+
+	// for a three band image 
+	// FIXME ... should be n bands
 	int stripe_heights[3] = { r->height, r->height, r->height };
 
-	kakadu->compressor->push_stripe(VIPS_REGION_ADDR(region, r->left, r->top),
-			                        stripe_heights);
+	bool result = kakadu->compressor->push_stripe(
+			(kdu_byte *) VIPS_REGION_ADDR(region, r->left, r->top),
+			stripe_heights);
+
+	if (!result) 
+		printf("push_stripe returned false\n");
 
 	return 0;
 }
@@ -172,8 +189,7 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 	image = save->ready;
 
 	if (!vips_band_format_isint(image->BandFmt)) {
-		vips_error(klass->nickname,
-			"%s", _("not an integer format"));
+		vips_error(klass->nickname, "%s", _("not an integer format"));
 		return -1;
 	}
 
@@ -211,11 +227,18 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 	kdu_codestream codestream; 
 	codestream.create(&siz, &output);
 
+	/*
+	 * FIXME ... an easy way to set props
+	 *
 	codestream.access_siz()->parse_string("Clayers=12");
 	codestream.access_siz()->parse_string("Creversible=yes");
-
 	codestream.access_siz()->parse_string("Qfactor=85");
 	codestream.access_siz()->parse_string("Ctype=Y,Cb,Cr,N");
+	 *
+	 */
+
+    output.write_header();
+    output.open_codestream(true);
 
 	kakadu->compressor = new kdu_stripe_compressor();
 	kakadu->compressor->start(codestream);
@@ -226,11 +249,11 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 
 	kakadu->compressor->finish();
 
-	if (vips_target_end(kakadu->target))
-		return -1;
-
 	codestream.destroy();
 	output.close();
+
+	if (vips_target_end(kakadu->target))
+		return -1;
 
 	return 0;
 }
@@ -242,6 +265,10 @@ vips_foreign_save_kakadu_class_init(VipsForeignSaveKakaduClass *klass)
 	VipsObjectClass *object_class = (VipsObjectClass *) klass;
 	VipsForeignClass *foreign_class = (VipsForeignClass *) klass;
 	VipsForeignSaveClass *save_class = (VipsForeignSaveClass *) klass;
+
+#ifdef DEBUG
+	printf("vips_foreign_save_kakadu_class_init:\n");
+#endif /*DEBUG*/
 
 	gobject_class->dispose = vips_foreign_save_kakadu_dispose;
 	gobject_class->set_property = vips_object_set_property;
