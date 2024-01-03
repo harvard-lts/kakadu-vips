@@ -21,8 +21,8 @@ LDFLAGS += `pkg-config vips --libs`
 
 # find kakadu headers and libs ... use the static libs to make install
 # easier
-KAKADUHOME = $(shell echo ../kakadu/v* | sed 's/ /\n/g' | grep -v .zip)
-KAKADU_ARCH = Linux-x86-64-gcc
+KAKADUHOME ?= $(shell echo ../kakadu/v* | sed 's/ /\n/g' | grep -v .zip)
+KAKADU_ARCH ?= Linux-x86-64-gcc
 CPPFLAGS += -I$(KAKADUHOME)/managed/all_includes
 LDFLAGS += $(KAKADUHOME)/lib/$(KAKADU_ARCH)/libkdu_aux.a
 LDFLAGS += $(KAKADUHOME)/lib/$(KAKADU_ARCH)/libkdu.a
