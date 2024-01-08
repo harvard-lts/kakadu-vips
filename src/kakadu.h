@@ -31,6 +31,11 @@ G_STMT_START \
     } \
 G_STMT_END
 
+// libvips 8.14 compatibility
+#ifndef VIPS_META_BITS_PER_SAMPLE
+#define VIPS_META_BITS_PER_SAMPLE "bits-per-sample"
+#endif
+
 extern const char *vips__kakadu_suffs[];
 
 // object init

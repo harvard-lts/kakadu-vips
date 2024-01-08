@@ -106,6 +106,7 @@ typedef struct _VipsForeignSaveKakadu {
 	 */
 	VipsRegion *strip;
 	VipsPel *tile_buffer;
+	int *stripe_heights;
 
 	/* If we need to subsample during unpacking.
 	 */
@@ -138,6 +139,7 @@ vips_foreign_save_kakadu_dispose(GObject *gobject)
 
 	VIPS_FREE(kakadu->tile_buffer);
 	VIPS_FREE(kakadu->accumulate);
+	VIPS_FREE(kakadu->stripe_heights);
 
 	G_OBJECT_CLASS(vips_foreign_save_kakadu_parent_class)->dispose(gobject);
 }
@@ -147,6 +149,7 @@ vips_foreign_save_kakadu_write_block(VipsRegion *region, VipsRect *area,
     void *user)
 {
     VipsForeignSaveKakadu *kakadu = (VipsForeignSaveKakadu *) user;
+	VipsImage *image = region->im;
 	VipsRect *r = &region->valid;
 
 #ifdef DEBUG_VERBOSE
@@ -155,13 +158,12 @@ vips_foreign_save_kakadu_write_block(VipsRegion *region, VipsRect *area,
 		r->left, r->top, r->width, r->height);
 #endif /*DEBUG_VERBOSE*/
 
-	// for a three band image 
-	// FIXME ... should be n bands
-	int stripe_heights[3] = { r->height, r->height, r->height };
+	for (int i = 0; i < image->Bands; i++) 
+		kakadu->stripe_heights[i] = r->height;
 
 	bool result = kakadu->compressor->push_stripe(
 			(kdu_byte *) VIPS_REGION_ADDR(region, r->left, r->top),
-			stripe_heights);
+			kakadu->stripe_heights);
 
 	if (!result) 
 		printf("push_stripe returned false\n");
@@ -192,6 +194,8 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 		vips_error(klass->nickname, "%s", _("not an integer format"));
 		return -1;
 	}
+
+	kakadu->stripe_heights = VIPS_ARRAY(NULL, image->Bands, int);
 
 	siz_params siz;
 
@@ -243,8 +247,7 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 	kakadu->compressor = new kdu_stripe_compressor();
 	kakadu->compressor->start(codestream);
 
-	if (vips_sink_disc(save->ready, 
-		vips_foreign_save_kakadu_write_block, kakadu))
+	if (vips_sink_disc(image, vips_foreign_save_kakadu_write_block, kakadu))
 		return -1;
 
 	kakadu->compressor->finish();
