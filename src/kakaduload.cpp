@@ -2,9 +2,9 @@
  */
 
 /*
+ */
 #define DEBUG_VERBOSE
 #define DEBUG
- */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -552,6 +552,7 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 		expected_colour_bands = 3;
 		break;
 
+	case JP2_iccRGB_SPACE:
 	case JP2_sRGB_SPACE:
 		kakadu->interpretation = VIPS_INTERPRETATION_sRGB;
 		expected_colour_bands = 3;
@@ -575,12 +576,12 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 	case JP2_YPbPr50_SPACE:
 	case JP2_esYCC_SPACE:
 	case JP2_iccLUM_SPACE:
-	case JP2_iccRGB_SPACE:
 	case JP2_iccANY_SPACE:
 	case JP2_vendor_SPACE:
 	default:
 		// unimplemented, or we're unsure
 		kakadu->interpretation = VIPS_INTERPRETATION_MULTIBAND;
+		expected_colour_bands = kakadu->channels.get_num_colours();
 		break;
 	}
 
