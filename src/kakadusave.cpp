@@ -23,22 +23,46 @@ using namespace kdu_supp; // includes the core namespace
  */
 class VipsKakaduTarget : public kdu_compressed_target {
 public:
-	VipsKakaduTarget(VipsTarget *_target)
+	VipsKakaduTarget()
 	{
-#ifdef DEBUG
+#ifdef DEBUG_VERBOSE
 		printf("new VipsKakaduTarget:\n");
-#endif /*DEBUG*/
-		target = _target;
-		g_object_ref(target);
+#endif /*DEBUG_VERBOSE*/
+
+		target = NULL;
 	}
 
 	~VipsKakaduTarget()
 	{
-#ifdef DEBUG
+#ifdef DEBUG_VERBOSE
 		printf("~VipsKakaduTarget:\n");
-#endif /*DEBUG*/
+#endif /*DEBUG_VERBOSE*/
 
-		VIPS_UNREF(target);
+		close();
+	}
+
+	bool exists() 
+	{ 
+		return target != NULL; 
+	}
+
+	bool operator!() 
+	{ 
+		return target == NULL; 
+	}
+
+	bool open(VipsTarget *_target)
+	{
+#ifdef DEBUG_VERBOSE
+		printf("VipsKakaduTarget::open()\n");
+#endif /*DEBUG_VERBOSE*/
+
+		close();
+
+		target = _target;
+		g_object_ref(target);
+
+		return true;
 	}
 
 	int get_capabilities() 
@@ -47,21 +71,20 @@ public:
 		return KDU_TARGET_CAP_SEQUENTIAL;
 	}
 
-	bool write(const kdu_byte *buf, int num_bytes)
+	virtual bool write(const kdu_byte *buf, int num_bytes)
 	{
 #ifdef DEBUG_VERBOSE
 		printf("VipsKakaduTarget: write %d bytes ...\n", num_bytes);
 #endif /*DEBUG_VERBOSE*/
-		gint64 bytes_written = vips_target_write(target, buf, num_bytes);
 
-		return bytes_written == num_bytes;
+		return !vips_target_write(target, buf, num_bytes);
 	}
 
 	virtual bool close()
 	{
-#ifdef DEBUG
+#ifdef DEBUG_VERBOSE
 		printf("VipsKakaduTarget: close()\n");
-#endif /*DEBUG*/
+#endif /*DEBUG_VERBOSE*/
 
 		VIPS_UNREF(target);
 		return true;
@@ -211,13 +234,13 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 	siz_ref->finalize();
 
 	// a kdu_compressed_target
-	kakadu->kakadu_target = new VipsKakaduTarget(kakadu->target);
+	kakadu->kakadu_target = new VipsKakaduTarget();
+	kakadu->kakadu_target->open(kakadu->target);
 
-	// we want a jp2 writer
 	jp2_family_tgt target;
+
 	target.open(kakadu->kakadu_target);
 
-	// a jp2 image which will write to our target
 	jp2_target output;
 	output.open(&target);
 
