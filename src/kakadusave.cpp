@@ -122,6 +122,7 @@ typedef struct _VipsForeignSaveKakadu {
 
 	/* Encoder state.
 	 */
+	kdu_thread_env *env;
 	kdu_stripe_compressor *compressor;
 
 	/* The line of tiles we are building, and the buffer we
@@ -154,6 +155,7 @@ vips_foreign_save_kakadu_dispose(GObject *gobject)
 {
 	VipsForeignSaveKakadu *kakadu = (VipsForeignSaveKakadu *) gobject;
 
+	DELETE(kakadu->env);
 	DELETE(kakadu->compressor);
 	DELETE(kakadu->kakadu_target);
 
@@ -264,7 +266,37 @@ vips_foreign_save_kakadu_build(VipsObject *object)
     output.open_codestream(true);
 
 	kakadu->compressor = new kdu_stripe_compressor();
-	kakadu->compressor->start(codestream);
+
+	// 16 seems like a sensible limit ... we want to avoid overcommitting
+	// thread resources if we can
+	int n_threads = VIPS_MIN(16, vips_concurrency_get());
+
+	kdu_thread_env env;
+	env.create();
+	for (int i = 0; i < n_threads; i++)
+		if (!env.add_thread()) {
+			vips_error(klass->nickname, "%s", "thread create failed");
+			return -1;
+		}
+
+	kakadu->compressor->start(codestream, 
+		0, 			// num_layer_specs
+		NULL, 		// layer_sizes
+		NULL, 		// layer_slopes
+		0, 			// min_slope_threshold
+		false, 		// no_auto_complexity_control
+		false, 		// force_precise
+		true, 		// record_layer_info_in_comment
+		0.0, 		// size_tolerance
+		0, 			// num_components
+		false, 		// want_fastest
+		&env,		// thread set
+		NULL, 		// env_queue
+		-1, 		// env_dbuf_height
+		-1, 		// env_tile_concurrency
+		true, 		// trim_to_rate
+		0, 			// flush_flags
+		NULL);		// multi_xform_extra_params
 
 	if (vips_sink_disc(image, vips_foreign_save_kakadu_write_block, kakadu))
 		return -1;
