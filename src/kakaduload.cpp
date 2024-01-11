@@ -2,9 +2,9 @@
  */
 
 /*
+ */
 #define DEBUG_VERBOSE
 #define DEBUG
- */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -160,18 +160,6 @@ typedef struct _VipsForeignLoadKakadu {
 	 */
 	int n_errors;
 } VipsForeignLoadKakadu;
-
-class kdu_stream_message : public kdu_message {
-  public: // Member classes
-    kdu_stream_message(std::ostream *stream)
-      { this->stream = stream; }
-    void put_text(const char *string)
-      { (*stream) << string; }
-    void flush(bool end_of_message=false)
-      { stream->flush(); }
-  private: // Data
-    std::ostream *stream;
-  };
 
 typedef VipsForeignLoadClass VipsForeignLoadKakaduClass;
 
