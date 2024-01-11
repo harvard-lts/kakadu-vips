@@ -1,5 +1,9 @@
 # Makefile for vips plugin 
 
+OUT = vips-kakadu.so
+
+all release debug: $(OUT)
+
 # object files
 OBJS = kakadu-vips.o kakaduload.o kakadusave.o
 
@@ -26,12 +30,6 @@ KAKADU_ARCH ?= Linux-x86-64-gcc
 CPPFLAGS += -I$(KAKADUHOME)/managed/all_includes
 LDFLAGS += $(KAKADUHOME)/lib/$(KAKADU_ARCH)/libkdu_aux.a
 LDFLAGS += $(KAKADUHOME)/lib/$(KAKADU_ARCH)/libkdu.a
-
-OUT = vips-kakadu.so
-
-all: $(OUT)
-release: $(OUT)
-debug: $(OUT)
 
 .PHONY: debug  
 debug: CXXFLAGS += -g -Wall

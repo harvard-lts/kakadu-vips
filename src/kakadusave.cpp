@@ -2,9 +2,9 @@
  */
 
 /*
- */
 #define DEBUG_VERBOSE
 #define DEBUG
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -184,12 +184,9 @@ vips_foreign_save_kakadu_write_block(VipsRegion *region, VipsRect *area,
 	for (int i = 0; i < image->Bands; i++) 
 		kakadu->stripe_heights[i] = r->height;
 
-	bool result = kakadu->compressor->push_stripe(
-			(kdu_byte *) VIPS_REGION_ADDR(region, r->left, r->top),
-			kakadu->stripe_heights);
-
-	if (!result) 
-		printf("push_stripe returned false\n");
+	kakadu->compressor->push_stripe(
+		(kdu_byte *) VIPS_REGION_ADDR(region, r->left, r->top),
+		kakadu->stripe_heights);
 
 	return 0;
 }
