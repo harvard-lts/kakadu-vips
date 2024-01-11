@@ -93,7 +93,6 @@ then `make clean` and `make` again.
 
 Build command-line apps and utilities with:
 
-
 ```
 $ cd v8_3-02172N/apps/make
 $ make -f Makefile-Linux-x86-64-gcc

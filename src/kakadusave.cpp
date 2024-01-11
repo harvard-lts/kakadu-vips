@@ -238,7 +238,6 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 	kakadu->kakadu_target->open(kakadu->target);
 
 	jp2_family_tgt target;
-
 	target.open(kakadu->kakadu_target);
 
 	jp2_target output;
