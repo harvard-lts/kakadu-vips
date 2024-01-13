@@ -21,14 +21,14 @@ See `v8_3-02172N/Compiling_Instructions.txt` for detailed notes.
 ## Enable high throughput jp2k
 
 You may have HTJP2K enabled already, if not, edit
-`v8_3-02172N/coresys/fast_coding/fbc_common.h` and uncomment `FBC_ENABLED`.
+`coresys/fast_coding/fbc_common.h` and uncomment `FBC_ENABLED`.
 You can avoid editing the source by using `make CXXFLAGS=-DFBC_ENABLED ...`
 when building coresys, of course.
 
-```
-$ cd v8_3-02172N
-$ mv srclib_ht srclib_ht_noopt
-$ cp -r altlib_ht_opt srclib_ht
+```shell
+cd v8_3-02172N
+mv srclib_ht srclib_ht_noopt
+cp -r altlib_ht_opt srclib_ht
 ```
 
 ## Prerequisites
@@ -36,32 +36,32 @@ $ cp -r altlib_ht_opt srclib_ht
 You might not have `libnuma`. The apps can also use libtiff, but it's pain
 to set up and we don't need it.
 
-```
-$ sudo apt install libnuma-dev
+```shall
+sudo apt install libnuma-dev
 ```
 
 ## `coresys`
 
 Build the core library with:
 
-```
-$ cd v8_3-02172N/coresys/make
-$ make -f Makefile-Linux-x86-64-gcc
+```shell
+cd coresys/make
+make -f Makefile-Linux-x86-64-gcc
 ```
 
 And the aux library with:
 
-```
-$ cd v8_3-02172N/managed/make
-$ make -f Makefile-Linux-x86-64-gcc all_but_jni
+```shall
+cd managed/make
+make -f Makefile-Linux-x86-64-gcc all_but_jni
 ```
 
 Makes:
 
-```
-$ ls v8_3-02172N/lib/Linux-x86-64-gcc/
+```shell
+$ ls lib/Linux-x86-64-gcc/
 libkdu.a  libkdu_a83R.so  libkdu_aux.a  libkdu_v83R.so
-$ ls v8_3-02172N/coresys/common/*.h
+$ ls coresys/common/*.h
 v8_3-02172N/coresys/common/kdu_arch.h
 v8_3-02172N/coresys/common/kdu_block_coding.h
 v8_3-02172N/coresys/common/kdu_compressed.h
@@ -93,15 +93,15 @@ then `make clean` and `make` again.
 
 Build command-line apps and utilities with:
 
-```
-$ cd v8_3-02172N/apps/make
-$ make -f Makefile-Linux-x86-64-gcc
+```shell
+cd apps/make
+make -f Makefile-Linux-x86-64-gcc
 ```
 
 To make:
 
-```
-$ ls v8_3-02172N/bin/Linux-x86-64-gcc/
+```shell
+$ ls bin/Linux-x86-64-gcc/
 kdu_buffered_compress  kdu_makeppm       kdu_stream_expand   kdu_vex_fast
 kdu_buffered_expand    kdu_maketlm       kdu_stream_send     kdu_v_expand
 kdu_compress           kdu_merge         kdu_text_extractor  simple_example_c
@@ -113,15 +113,15 @@ kdu_jp2info            kdu_server_admin  kdu_v_compress
 This also builds the documentation from source code comments using 
 `kdu_hyperdoc`:
 
-```
-$ firefox v8_3-02172N/documentation/index.html 
+```shell
+$ firefox documentation/index.html 
 ```
 
 ## Install
 
 Append something like this to your `.bashrc`:
 
-```
+```shell
 export KAKADUHOME=/home/john/GIT/kakadu-vips/kakadu/v8_3-02172N
 export PATH="$KAKADUHOME/bin/Linux-x86-64-gcc:$PATH"
 export LD_LIBRARY_PATH="$KAKADUHOME/lib/Linux-x86-64-gcc:$LD_LIBRARY_PATH"
