@@ -108,6 +108,8 @@ typedef struct _VipsForeignSaveKakadu {
 	int tile_width;
 	int tile_height;
 
+	char *options;
+
 	/* Lossless mode.
 	 */
 	gboolean lossless;
@@ -255,15 +257,21 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 	kdu_codestream codestream; 
 	codestream.create(&siz, &output);
 
-	/*
-	 * FIXME ... an easy way to set props
-	 *
-	codestream.access_siz()->parse_string("Clayers=12");
-	codestream.access_siz()->parse_string("Creversible=yes");
-	codestream.access_siz()->parse_string("Qfactor=85");
-	codestream.access_siz()->parse_string("Ctype=Y,Cb,Cr,N");
-	 *
-	 */
+	if (vips_object_argument_isset(object, "options")) {
+		siz_params *siz = codestream.access_siz();
+
+		char *options, *p, *q;
+
+		options = g_strdup(kakadu->options);
+
+		for(p = options; (q = vips_break_token(p, "; ")); p = q)
+			if( !siz->parse_string(p)) {
+				vips_error(klass->nickname, _("unable to set option %s"), p);
+				return -1;
+			}
+
+		g_free(options);
+	}
 
     output.write_header();
     output.open_codestream(true);
@@ -282,24 +290,29 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 			return -1;
 		}
 
+	int num_layer_specs = 0;
+	const kdu_long *layer_sizes = NULL;
+	const kdu_uint16 *layer_slopes = NULL;
+	kdu_uint16 min_slope_threshold = 0;
+	bool no_auto_complexity_control = false;
+	bool force_precise = false;
+	bool record_layer_info_in_comment = true;
+	double size_tolerance = 0.0;
+	int num_components = 0;
+	bool want_fastest = false;
+
 	kakadu->compressor->start(codestream, 
-		0, 			// num_layer_specs
-		NULL, 		// layer_sizes
-		NULL, 		// layer_slopes
-		0, 			// min_slope_threshold
-		false, 		// no_auto_complexity_control
-		false, 		// force_precise
-		true, 		// record_layer_info_in_comment
-		0.0, 		// size_tolerance
-		0, 			// num_components
-		false, 		// want_fastest
-		&env,		// thread set
-		NULL, 		// env_queue
-		-1, 		// env_dbuf_height
-		-1, 		// env_tile_concurrency
-		true, 		// trim_to_rate
-		0, 			// flush_flags
-		NULL);		// multi_xform_extra_params
+		num_layer_specs,
+		layer_sizes,
+		layer_slopes,
+		min_slope_threshold,
+		no_auto_complexity_control,
+		force_precise,
+		record_layer_info_in_comment,
+		size_tolerance,
+		num_components,
+		want_fastest,
+		&env);
 
 	if (vips_sink_disc(image, vips_foreign_save_kakadu_write_block, kakadu))
 		return -1;
@@ -374,6 +387,14 @@ vips_foreign_save_kakadu_class_init(VipsForeignSaveKakaduClass *klass)
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveKakadu, Q),
 		1, 100, 48);
+
+	VIPS_ARG_STRING(klass, "options", 25,
+        _("Options"),
+        _("Set of Kakadu option specifications"),
+        VIPS_ARGUMENT_OPTIONAL_INPUT,
+        G_STRUCT_OFFSET(VipsForeignSaveKakadu, options),
+        NULL);
+
 }
 
 static void
@@ -572,6 +593,7 @@ vips_foreign_save_kakadu_target_init(VipsForeignSaveKakaduTarget *target)
  *
  * Optional arguments:
  *
+ * * @options: %gchararray, set of Kakadu options
  * * @Q: %gint, quality factor
  * * @lossless: %gboolean, enables lossless compression
  * * @tile_width: %gint for tile size
@@ -582,6 +604,9 @@ vips_foreign_save_kakadu_target_init(VipsForeignSaveKakaduTarget *target)
  * The saver supports 8, 16 and 32-bit int pixel
  * values, signed and unsigned. It supports greyscale, RGB, CMYK and
  * multispectral images.
+ *
+ * Use @options to provide a set of Kakadu options, separated by spaces or
+ * semicolons. For example `"Clayers=12;Creversible=yes;Qfactor=20"`.
  *
  * Use @Q to set the compression quality factor. The default value
  * produces file with approximately the same size as regular JPEG Q 75.

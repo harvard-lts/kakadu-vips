@@ -37,3 +37,20 @@ class TestKakaduLoad:
         self.ppm.kakadusave(filename)
         self.image_matches_file(self.ppm, filename)
 
+    @skip_if_no("kakadusave")
+    @skip_if_no("jp2kload")
+    def test_kakadusave_buffer(self):
+        buf = self.ppm.kakadusave_buffer()
+        image = pyvips.Image.new_from_buffer(buf, "")
+        self.image_matches_file(image, PPM_FILE)
+
+    @skip_if_no("kakaduload")
+    @skip_if_no("kakadusave")
+    @skip_if_no("jp2kload")
+    def test_kakadusave_options(self):
+        q1 = self.ppm.kakadusave_buffer(options="Qfactor=1")
+        q99 = self.ppm.kakadusave_buffer(options="Qfactor=99")
+
+        assert len(q1) < len(q99)
+
+
