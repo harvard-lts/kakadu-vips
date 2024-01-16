@@ -46,7 +46,10 @@ test/test_kakadusave.py .                                                [100%]
 
 ## TODO
 
-- implement shrink-on-load via the page parameter
+- implement resolution load and save, see `extract_jp2_resolution_info()`
+  in `kdu_expand` etc.
+
+- kakadu does not seem to support icc profile save
 
 - 16 bit and float images should work, but need testing
 
@@ -59,5 +62,3 @@ test/test_kakadusave.py .                                                [100%]
 - chroma subsampling should work, but needs testing
 
 - multispectral images should work, but need testing
-
-- implement `kakadusave`
