@@ -52,5 +52,14 @@ class TestKakaduLoad:
         image = pyvips.Image.kakaduload_source(source)
         self.image_matches_file(image, JP2K_FILE) 
 
+    @skip_if_no("kakaduload")
+    def test_kakaduload_subsample(self):
+        image = pyvips.Image.kakaduload(JP2K_FILE)
+        big_average = image.avg()
+        big_width = image.width
+        big_height = image.height
 
-
+        image = pyvips.Image.kakaduload(JP2K_FILE, page=1)
+        assert image.width == big_width // 2
+        assert image.height == big_height // 2
+        assert abs(big_average - image.avg()) < 1

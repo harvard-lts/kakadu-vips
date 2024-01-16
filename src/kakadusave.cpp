@@ -248,6 +248,9 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 	jp2_colour colr = output.access_colour();
 	colr.init((image->Bands == 3) ? JP2_sRGB_SPACE : JP2_sLUM_SPACE);
 
+	// kakadu does not seem to support setting an icc profile, only 
+	// loading them
+
 	// serialise the image into a codestream
 	kdu_codestream codestream; 
 	codestream.create(&siz, &output);

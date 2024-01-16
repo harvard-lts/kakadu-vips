@@ -9,6 +9,7 @@ import pyvips
 IMAGES = os.path.join(os.path.dirname(__file__), os.pardir, 'images')
 PPM_FILE = os.path.join(IMAGES, "sample_640×426.ppm")
 JP2K_FILE = os.path.join(IMAGES, "world.jp2")
+JPEG_FILE = os.path.join(IMAGES, "test_800x600.jpg")
 
 unsigned_formats = ["uchar", "ushort", "uint"]
 signed_formats = ["char", "short", "int"]
