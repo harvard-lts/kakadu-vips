@@ -640,7 +640,7 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 	}
 
 	// can be more with alpha etc.
-	if (expected_colour_bands < kakadu->bands) {
+	if (expected_colour_bands > kakadu->bands) {
 		vips_error(klass->nickname,
 			"%s", _("incorrect number of colour bands for colour space"));
 		return -1;

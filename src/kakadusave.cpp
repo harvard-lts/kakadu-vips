@@ -249,7 +249,7 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 	dims.init(&siz);
 
 	jp2_colour colr = output.access_colour();
-	colr.init((image->Bands == 3) ? JP2_sRGB_SPACE : JP2_sLUM_SPACE);
+	colr.init((image->Bands >= 3) ? JP2_sRGB_SPACE : JP2_sLUM_SPACE);
 
 	jp2_resolution res = output.access_resolution();
 	res.init(image->Xres / image->Yres);
