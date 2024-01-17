@@ -63,3 +63,9 @@ class TestKakaduLoad:
         assert image.width == big_width // 2
         assert image.height == big_height // 2
         assert abs(big_average - image.avg()) < 1
+
+    @skip_if_no("kakaduload")
+    def test_kakaduload_resolution(self):
+        image = pyvips.Image.kakaduload(JP2K_RESOLUTION_FILE)
+        assert abs(image.xres - 11.8) < 0.1
+        assert abs(image.yres - 11.8) < 0.1

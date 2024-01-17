@@ -3,8 +3,8 @@
 
 /*
 #define DEBUG_VERBOSE
-#define DEBUG
  */
+#define DEBUG
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -383,8 +383,10 @@ vips_foreign_load_kakadu_print(VipsForeignLoadKakadu *kakadu)
 
 	printf("  resolution.get_aspect_ratio() = %g\n", 
 			kakadu->resolution.get_aspect_ratio());
-	printf("  resolution.get_resolution() = %g pixels per metre\n", 
-			kakadu->resolution.get_resolution());
+	printf("  resolution.get_resolution(false) = %g pixels per metre\n", 
+			kakadu->resolution.get_resolution(false));
+	printf("  resolution.get_resolution(true) = %g pixels per metre\n", 
+			kakadu->resolution.get_resolution(true));
 
 	printf("  colour.get_num_colours() = %d\n", 
 			kakadu->colour.get_num_colours());
@@ -447,6 +449,25 @@ vips_foreign_load_kakadu_set_error_behaviour(VipsForeignLoadKakadu *kakadu)
 	else
 		// FIXME ... hmm check this
 		kakadu->codestream.set_fast();
+}
+
+static void
+vips_foreign_load_kakadu_get_resolution( VipsForeignLoadKakadu *kakadu )
+{
+	double kakadu_resolution;
+
+	// first check for capture resolution 
+	kakadu_resolution = kakadu->resolution.get_resolution(false);
+	if (kakadu_resolution <= 0.0) {
+		// try for display resolution 
+		kakadu_resolution = kakadu->resolution.get_resolution(true);
+		if (kakadu_resolution <= 0.0) 
+			kakadu_resolution = 1.0;
+	}
+
+	// kakadu uses pixels per metre
+	kakadu->yres = kakadu_resolution / 1000.0;
+	kakadu->xres = kakadu->yres * kakadu->resolution.get_aspect_ratio();
 }
 
 static int
@@ -625,9 +646,7 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 		return -1;
 	}
 
-	// kakadu uses pixels per metre
-	kakadu->yres = kakadu->resolution.get_resolution() / 1000.0;
-	kakadu->xres = kakadu->yres * kakadu->resolution.get_aspect_ratio();
+	vips_foreign_load_kakadu_get_resolution(kakadu);
 
 #ifdef DEBUG
 	vips_foreign_load_kakadu_print(kakadu);

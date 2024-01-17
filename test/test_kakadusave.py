@@ -50,7 +50,14 @@ class TestKakaduLoad:
     def test_kakadusave_options(self):
         q1 = self.ppm.kakadusave_buffer(options="Qfactor=1")
         q99 = self.ppm.kakadusave_buffer(options="Qfactor=99")
-
         assert len(q1) < len(q99)
 
+    @skip_if_no("kakaduload")
+    def test_kakadusave_resolution(self):
+        image = pyvips.Image.kakaduload(JP2K_RESOLUTION_FILE)
+        filename = temp_filename(self.tempdir, ".jp2")
+        image.kakadusave(filename)
+        image = pyvips.Image.kakaduload(filename)
+        assert abs(image.xres - 11.8) < 0.1
+        assert abs(image.yres - 11.8) < 0.1
 

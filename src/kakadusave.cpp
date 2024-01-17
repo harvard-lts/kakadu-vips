@@ -247,8 +247,14 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 	// set image properties
 	jp2_dimensions dims = output.access_dimensions(); 
 	dims.init(&siz);
+
 	jp2_colour colr = output.access_colour();
 	colr.init((image->Bands == 3) ? JP2_sRGB_SPACE : JP2_sLUM_SPACE);
+
+	jp2_resolution res = output.access_resolution();
+	res.init(image->Xres / image->Yres);
+	// kakadu works in pixels per metre
+	res.set_resolution((float) image->Yres * 1000.0, false);
 
 	// kakadu does not seem to support setting an icc profile, only 
 	// loading them
