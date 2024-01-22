@@ -50,7 +50,8 @@ tags: $(ALL)
 # version as MAJOR.MINOR
 VIPS_VERSION = $(shell pkg-config vips --modversion | \
 	         awk '{split($$1,a,"."); print a[1]"."a[2]}')
-PLUGIN_DIR = $(VIPSHOME)/lib/vips-modules-$(VIPS_VERSION)
+VIPS_LIBDIR = $(shell pkg-config vips --variable libdir)
+PLUGIN_DIR = $(VIPS_LIBDIR)/vips-modules-$(VIPS_VERSION)
 
 install: $(OUT)
 	-mkdir -p $(PLUGIN_DIR)
