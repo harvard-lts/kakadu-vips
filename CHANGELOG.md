@@ -6,6 +6,7 @@
 - add shrink-on-load using the "page" param to kakaduload
 - add "options" arg to kakadusave
 - add resolution load and save
+- add `ORGgen_tlm` support 
 - add "rate" arg to save
 
 ## 2024/1/11 1.0
