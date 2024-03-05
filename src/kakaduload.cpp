@@ -923,7 +923,7 @@ vips_foreign_load_kakadu_file_build(VipsObject *object)
 }
 
 const char *vips__kakadu_suffs[] = {
-	".j2k", ".jp2", ".jpt", ".j2c", ".jpc", NULL
+	".jph", ".j2k", ".jp2", ".jpt", ".j2c", ".jpc", NULL
 };
 
 static int

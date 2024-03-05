@@ -6,6 +6,7 @@
 - add shrink-on-load using the "page" param to kakaduload
 - add "options" arg to kakadusave
 - add resolution load and save
+- add "htj2k" arg to enable high-throughput j2k compression
 - add `ORGgen_tlm` support 
 - add "rate" arg to save
 
