@@ -62,6 +62,7 @@ class TestKakaduSave:
         assert abs(image.yres - 11.8) < 0.1
 
     @skip_if_no("kakadusave")
+    @skip_if_no("kakaduload")
     def test_kakadusave_rate(self):
         data1 = self.ppm.kakadusave_buffer(rate=1)
         data10 = self.ppm.kakadusave_buffer(rate=10)
