@@ -21,13 +21,13 @@ class TestKakaduLoad:
     def teardown_class(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
-    def image_matches_file(self, image, filename):
+    def image_matches_file(self, image, filename, threshold = 10):
         image_file = pyvips.Image.new_from_file(filename)
         assert image.width == image_file.width
         assert image.height == image_file.height
         assert image.bands == image_file.bands
         assert image.format == image_file.format
-        assert (image - image_file).abs().max() < 10
+        assert (image - image_file).abs().max() < threshold
 
     @skip_if_no("kakaduload")
     @skip_if_no("kakadusave")
@@ -60,4 +60,14 @@ class TestKakaduLoad:
         image = pyvips.Image.kakaduload(filename)
         assert abs(image.xres - 11.8) < 0.1
         assert abs(image.yres - 11.8) < 0.1
+
+    @skip_if_no("kakadusave")
+    def test_kakadusave_tlm(self):
+        # tlm needs working rewrite in target
+        data = self.ppm.kakadusave_buffer(options="Qfactor=90 Cmodes=HT ORGgen_plt=yes Creversible=no Cblk={64,64} ORGtparts=R ORGgen_tlm=9")
+        assert len(data) > 100
+        image = pyvips.Image.kakaduload_buffer(data)
+        self.image_matches_file(image, PPM_FILE, 15)
+
+
 

@@ -71,6 +71,40 @@ public:
 		return KDU_TARGET_CAP_SEQUENTIAL;
 	}
 
+	virtual bool start_rewrite(kdu_long backtrack)
+	{
+#ifdef DEBUG_VERBOSE
+		printf("VipsKakaduTarget: start_rewrite(%lld)\n", backtrack);
+#endif /*DEBUG_VERBOSE*/
+
+		if (in_rewrite)
+			return false;
+
+		saved_position = vips_target_seek(target, 0, SEEK_CUR);
+		if (backtrack < 0 || saved_position - backtrack < 0)
+			return false;
+
+		vips_target_seek(target, -backtrack, SEEK_CUR);
+		in_rewrite = true;
+
+		return true;
+	}
+
+	virtual bool end_rewrite()
+	{
+#ifdef DEBUG_VERBOSE
+		printf("VipsKakaduTarget: end_rewrite\n");
+#endif /*DEBUG_VERBOSE*/
+
+		if (!in_rewrite)
+			return false;
+
+		vips_target_seek(target, saved_position, SEEK_SET);
+		in_rewrite = false;
+
+		return true;
+	}
+
 	virtual bool write(const kdu_byte *buf, int num_bytes)
 	{
 #ifdef DEBUG_VERBOSE
@@ -92,6 +126,8 @@ public:
 
 private:
 	VipsTarget *target;
+	gint64 saved_position = 0;
+	bool in_rewrite = false;
 };
 
 typedef struct _VipsForeignSaveKakadu {
