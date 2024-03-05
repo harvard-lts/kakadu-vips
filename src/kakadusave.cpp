@@ -114,6 +114,10 @@ typedef struct _VipsForeignSaveKakadu {
 	 */
 	gboolean lossless;
 
+	/* Enable high-throughput jp2k.
+	 */
+	gboolean htj2k;
+
 	/* Quality factor.
 	 */
 	int Q;
@@ -195,6 +199,11 @@ vips_foreign_save_kakadu_write_block(VipsRegion *region, VipsRect *area,
 	return 0;
 }
 
+const char *vips__jph_suffix[] = {
+	".jph", 
+	NULL
+};
+
 static int
 vips_foreign_save_kakadu_build(VipsObject *object)
 {
@@ -219,6 +228,14 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 		return -1;
 	}
 
+	// see if we have something like a jph filename and enable high-throughput
+	// compression
+	const char *filename = 
+		vips_connection_filename(VIPS_CONNECTION(kakadu->target));
+	if (filename && 
+		vips_filename_suffix_match(filename, vips__jph_suffix))
+		kakadu->htj2k = true;
+
 	kakadu->stripe_heights = VIPS_ARRAY(NULL, image->Bands, int);
 
 	siz_params siz;
@@ -226,9 +243,12 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 	siz.set(Scomponents, 0, 0, image->Bands);
 	siz.set(Sdims, 0, 0, image->Ysize);
 	siz.set(Sdims, 0, 1, image->Xsize);
-	siz.set(Sprecision, 0, 0, 
-			(int) (vips_format_sizeof(image->BandFmt) << 3));
+	siz.set(Sprecision, 0, 0, (int) (vips_format_sizeof(image->BandFmt) << 3));
 	siz.set(Ssigned, 0, 0, false);
+
+	// enable high throughput jp2 compression
+	if (kakadu->htj2k)
+		siz.set(Scap, 0, 0, Scap_P15);
 
 	// finalize to complete other fields ... has to be a reference
 	kdu_params *siz_ref = &siz; 
@@ -387,19 +407,26 @@ vips_foreign_save_kakadu_class_init(VipsForeignSaveKakaduClass *klass)
 		VIPS_TYPE_FOREIGN_SUBSAMPLE,
 		VIPS_FOREIGN_SUBSAMPLE_OFF);
 
-	VIPS_ARG_INT(klass, "Q", 14,
-		_("Q"),
-		_("Q factor"),
-		VIPS_ARGUMENT_OPTIONAL_INPUT,
-		G_STRUCT_OFFSET(VipsForeignSaveKakadu, Q),
-		1, 100, 48);
-
 	VIPS_ARG_STRING(klass, "options", 25,
         _("Options"),
         _("Set of Kakadu option specifications"),
         VIPS_ARGUMENT_OPTIONAL_INPUT,
         G_STRUCT_OFFSET(VipsForeignSaveKakadu, options),
         NULL);
+
+	VIPS_ARG_BOOL(klass, "htj2k", 15,
+		_("High-throughput"),
+		_("Enable high-throughput jp2k compression"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveKakadu, htj2k),
+		FALSE);
+
+	VIPS_ARG_INT(klass, "Q", 14,
+		_("Q"),
+		_("Q factor"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveKakadu, Q),
+		1, 100, 48);
 
 }
 
@@ -625,6 +652,9 @@ vips_foreign_save_kakadu_target_init(VipsForeignSaveKakaduTarget *target)
  * @subsample_mode to auto to enable chroma subsample for Q < 90. Subsample
  * mode uses YCC rather than RGB colourspace, and many jpeg2000 decoders do
  * not support this.
+ *
+ * Set @htj2k to enable high-throughput jpeg2000 compression. This option is
+ * enabled automatically if a filename ending in `.jph` is detected.
  *
  * This operation always writes a pyramid.
  *

@@ -61,3 +61,10 @@ class TestKakaduLoad:
         assert abs(image.xres - 11.8) < 0.1
         assert abs(image.yres - 11.8) < 0.1
 
+    @skip_if_no("kakadusave")
+    def test_kakadusave_htj2k(self):
+        data1 = self.ppm.kakadusave_buffer()
+        data2 = self.ppm.kakadusave_buffer(htj2k=True)
+
+        # ie. the option has had an effect
+        assert len(data1) != len(data2)
