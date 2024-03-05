@@ -9,7 +9,7 @@ import pytest
 import pyvips
 from helpers import *
 
-class TestKakaduLoad:
+class TestKakaduSave:
     tempdir = None
 
     @classmethod
@@ -21,7 +21,7 @@ class TestKakaduLoad:
     def teardown_class(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
-    def image_matches_file(self, image, filename, threshold = 10):
+    def image_matches_file(self, image, filename, threshold=10):
         image_file = pyvips.Image.new_from_file(filename)
         assert image.width == image_file.width
         assert image.height == image_file.height
@@ -69,5 +69,15 @@ class TestKakaduLoad:
         image = pyvips.Image.kakaduload_buffer(data)
         self.image_matches_file(image, PPM_FILE, 15)
 
+    @skip_if_no("kakaduload")
+    def test_kakadusave_rate(self):
+        data1 = self.ppm.kakadusave_buffer(rate=1)
+        data10 = self.ppm.kakadusave_buffer(rate=10)
+        assert len(data1) < len(data10)
 
+        image1 = pyvips.Image.kakaduload_buffer(data1)
+        self.image_matches_file(image1, PPM_FILE, 100)
+
+        image10 = pyvips.Image.kakaduload_buffer(data10)
+        self.image_matches_file(image10, PPM_FILE, 10)
 

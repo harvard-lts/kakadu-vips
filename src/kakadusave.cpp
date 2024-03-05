@@ -18,6 +18,9 @@
 
 using namespace kdu_supp; // includes the core namespace
 
+// so 32 bits on a log2 scale
+#define MAX_LAYER_COUNT (32)
+
 /* A VipsTarget as a Kakadu output object. This keeps the reference
  * alive while it's alive.
  */
@@ -153,6 +156,10 @@ typedef struct _VipsForeignSaveKakadu {
 	/* Quality factor.
 	 */
 	int Q;
+
+	/* Rate.
+	 */
+	VipsArea *rate;
 
 	/* Chroma subsample mode.
 	 */
@@ -301,18 +308,15 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 
 	if (vips_object_argument_isset(object, "options")) {
 		siz_params *siz = codestream.access_siz();
+		g_autofree char *options = g_strdup(kakadu->options);
 
-		char *options, *p, *q;
-
-		options = g_strdup(kakadu->options);
+		char *p, *q;
 
 		for(p = options; (q = vips_break_token(p, "; ")); p = q)
-			if( !siz->parse_string(p)) {
+			if (!siz->parse_string(p)) {
 				vips_error(klass->nickname, _("unable to set option %s"), p);
 				return -1;
 			}
-
-		g_free(options);
 	}
 
     output.write_header();
@@ -332,9 +336,15 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 			return -1;
 		}
 
-	int num_layer_specs = 0;
-	const kdu_long *layer_sizes = NULL;
+	// FIXME ... need to check vector lengths when we add more array args
+	int num_layer_specs = kakadu->rate ? kakadu->rate->n : 0;
+	kdu_long layer_sizes[MAX_LAYER_COUNT] = { 0 };
+	for (int i = 0; i < num_layer_specs; i++) 
+		layer_sizes[i] = VIPS_IMAGE_N_PELS(image) * 
+			0.125 * ((int *) kakadu->rate->data)[i];
+
 	const kdu_uint16 *layer_slopes = NULL;
+
 	kdu_uint16 min_slope_threshold = 0;
 	bool no_auto_complexity_control = false;
 	bool force_precise = false;
@@ -436,6 +446,13 @@ vips_foreign_save_kakadu_class_init(VipsForeignSaveKakaduClass *klass)
         VIPS_ARGUMENT_OPTIONAL_INPUT,
         G_STRUCT_OFFSET(VipsForeignSaveKakadu, options),
         NULL);
+
+	VIPS_ARG_BOXED(klass, "rate", 111,
+        _("Bitrate"),
+        _("Bitrate per layer"),
+        VIPS_ARGUMENT_OPTIONAL_INPUT,
+        G_STRUCT_OFFSET(VipsForeignSaveKakadu, rate),
+        VIPS_TYPE_ARRAY_INT);
 
 }
 
@@ -649,6 +666,8 @@ vips_foreign_save_kakadu_target_init(VipsForeignSaveKakaduTarget *target)
  *
  * Use @options to provide a set of Kakadu options, separated by spaces or
  * semicolons. For example `"Clayers=12;Creversible=yes;Qfactor=20"`.
+ *
+ * Use @rate to specify a bitrate per layer. 
  *
  * Use @Q to set the compression quality factor. The default value
  * produces file with approximately the same size as regular JPEG Q 75.
