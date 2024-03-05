@@ -445,28 +445,6 @@ vips_foreign_save_kakadu_class_init(VipsForeignSaveKakaduClass *klass)
 		G_STRUCT_OFFSET(VipsForeignSaveKakadu, lossless),
 		FALSE);
 
-	VIPS_ARG_ENUM(klass, "subsample_mode", 19,
-		_("Subsample mode"),
-		_("Select chroma subsample operation mode"),
-		VIPS_ARGUMENT_OPTIONAL_INPUT,
-		G_STRUCT_OFFSET(VipsForeignSaveKakadu, subsample_mode),
-		VIPS_TYPE_FOREIGN_SUBSAMPLE,
-		VIPS_FOREIGN_SUBSAMPLE_OFF);
-
-	VIPS_ARG_STRING(klass, "options", 25,
-        _("Options"),
-        _("Set of Kakadu option specifications"),
-        VIPS_ARGUMENT_OPTIONAL_INPUT,
-        G_STRUCT_OFFSET(VipsForeignSaveKakadu, options),
-        NULL);
-
-	VIPS_ARG_BOOL(klass, "htj2k", 15,
-		_("High-throughput"),
-		_("Enable high-throughput jp2k compression"),
-		VIPS_ARGUMENT_OPTIONAL_INPUT,
-		G_STRUCT_OFFSET(VipsForeignSaveKakadu, htj2k),
-		FALSE);
-
 	VIPS_ARG_INT(klass, "Q", 14,
 		_("Q"),
 		_("Q factor"),
@@ -474,7 +452,29 @@ vips_foreign_save_kakadu_class_init(VipsForeignSaveKakaduClass *klass)
 		G_STRUCT_OFFSET(VipsForeignSaveKakadu, Q),
 		1, 100, 48);
 
-  VIPS_ARG_BOXED(klass, "rate", 111,
+	VIPS_ARG_ENUM(klass, "subsample_mode", 15,
+		_("Subsample mode"),
+		_("Select chroma subsample operation mode"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveKakadu, subsample_mode),
+		VIPS_TYPE_FOREIGN_SUBSAMPLE,
+		VIPS_FOREIGN_SUBSAMPLE_OFF);
+
+	VIPS_ARG_STRING(klass, "options", 16,
+        _("Options"),
+        _("Set of Kakadu option specifications"),
+        VIPS_ARGUMENT_OPTIONAL_INPUT,
+        G_STRUCT_OFFSET(VipsForeignSaveKakadu, options),
+        NULL);
+
+	VIPS_ARG_BOOL(klass, "htj2k", 17,
+		_("High-throughput"),
+		_("Enable high-throughput jp2k compression"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveKakadu, htj2k),
+		FALSE);
+
+  VIPS_ARG_BOXED(klass, "rate", 18,
         _("Bitrate"),
         _("Bitrate per layer"),
         VIPS_ARGUMENT_OPTIONAL_INPUT,
