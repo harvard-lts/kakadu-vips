@@ -29,13 +29,11 @@ class TestKakaduLoad:
         assert image.format == image_file.format
         assert (image - image_file).abs().max() < 10
 
-    @skip_if_no("kakaduload")
     @skip_if_no("jp2kload")
     def test_kakaduload_file(self):
         image = pyvips.Image.kakaduload(JP2K_FILE)
         self.image_matches_file(image, JP2K_FILE) 
 
-    @skip_if_no("kakaduload")
     @skip_if_no("jp2kload")
     def test_kakaduload_buffer(self):
         with open(JP2K_FILE, 'rb') as f:
@@ -43,7 +41,6 @@ class TestKakaduLoad:
         image = pyvips.Image.kakaduload_buffer(buf)
         self.image_matches_file(image, JP2K_FILE) 
 
-    @skip_if_no("kakaduload")
     @skip_if_no("jp2kload")
     def test_kakaduload_source_memory(self):
         with open(JP2K_FILE, 'rb') as f:
@@ -52,7 +49,6 @@ class TestKakaduLoad:
         image = pyvips.Image.kakaduload_source(source)
         self.image_matches_file(image, JP2K_FILE) 
 
-    @skip_if_no("kakaduload")
     def test_kakaduload_subsample(self):
         image = pyvips.Image.kakaduload(JP2K_FILE)
         big_average = image.avg()
@@ -64,7 +60,6 @@ class TestKakaduLoad:
         assert image.height == big_height // 2
         assert abs(big_average - image.avg()) < 1
 
-    @skip_if_no("kakaduload")
     def test_kakaduload_resolution(self):
         image = pyvips.Image.kakaduload(JP2K_RESOLUTION_FILE)
         assert abs(image.xres - 11.8) < 0.1
