@@ -312,15 +312,39 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 	dims.init(&siz);
 
 	jp2_colour colr = output.access_colour();
-	colr.init((image->Bands >= 3) ? JP2_sRGB_SPACE : JP2_sLUM_SPACE);
+
+	if (save->profile) {
+		// init colour from supplied profile
+		VipsBlob *blob;
+		if (vips_profile_load(save->profile, &blob, NULL))
+			return -1;
+		if (!blob)
+			return -1;
+
+		size_t length;
+		const void *data = vips_blob_get(blob, &length);
+
+		colr.init((kdu_byte *) data);
+
+		vips_area_unref((VipsArea *) blob);
+	}
+	else if (vips_image_get_typeof(image, VIPS_META_ICC_NAME)) {
+		// init colour from embedded ICC profile
+		size_t length;
+		const void *data;
+		if (vips_image_get_blob(image, VIPS_META_ICC_NAME, &data, &length))
+			return -1;
+
+		colr.init((kdu_byte *) data);
+	}
+	else
+		// init colour from image metadata
+		colr.init((image->Bands >= 3) ? JP2_sRGB_SPACE : JP2_sLUM_SPACE);
 
 	jp2_resolution res = output.access_resolution();
 	res.init(image->Xres / image->Yres);
 	// kakadu works in pixels per metre
 	res.set_resolution((float) image->Yres * 1000.0, false);
-
-	// kakadu does not seem to support setting an icc profile, only 
-	// loading them
 
 	// serialise the image into a codestream
 	kdu_codestream codestream; 

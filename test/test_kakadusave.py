@@ -77,3 +77,8 @@ class TestKakaduSave:
 
         image10 = pyvips.Image.kakaduload_buffer(data10)
         self.image_matches_file(image10, PPM_FILE, 10)
+
+    def test_kakadusave_profile(self):
+        data = self.ppm.kakadusave_buffer(profile="srgb")
+        image = pyvips.Image.kakaduload_buffer(data)
+        assert len(image.get("icc-profile-data")) == 480

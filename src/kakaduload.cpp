@@ -452,7 +452,7 @@ vips_foreign_load_kakadu_set_error_behaviour(VipsForeignLoadKakadu *kakadu)
 }
 
 static void
-vips_foreign_load_kakadu_get_resolution( VipsForeignLoadKakadu *kakadu )
+vips_foreign_load_kakadu_get_resolution(VipsForeignLoadKakadu *kakadu)
 {
 	double kakadu_resolution;
 
