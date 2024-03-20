@@ -2,6 +2,7 @@
  */
 
 /*
+#define DEBUG_READ
 #define DEBUG_VERBOSE
 #define DEBUG
  */
@@ -31,9 +32,9 @@ public:
 
 	~VipsKakaduSource()
 	{
-#ifdef DEBUG
+#ifdef DEBUG_READ
 		printf("~VipsKakaduSource:\n");
-#endif /*DEBUG*/
+#endif /*DEBUG_READ*/
 
 		VIPS_UNREF(source);
 	}
@@ -45,9 +46,9 @@ public:
 
 	virtual bool seek(kdu_long offset)
 	{
-#ifdef DEBUG_VERBOSE
+#ifdef DEBUG_READ
 		printf("VipsKakaduSource: seek(%lld)\n", offset);
-#endif /*DEBUG_VERBOSE*/
+#endif /*DEBUG_READ*/
 
 		// kakadu assumes this will always succeed
 		(void) vips_source_seek(source, offset, SEEK_SET);
@@ -64,9 +65,9 @@ public:
 	{
 		gint64 bytes_read = vips_source_read(source, buf, num_bytes);
 
-#ifdef DEBUG_VERBOSE
+#ifdef DEBUG_READ
 		printf("VipsKakaduSource: read(%d) = %ld\n", num_bytes, bytes_read);
-#endif /*DEBUG_VERBOSE*/
+#endif /*DEBUG_READ*/
 
 		return bytes_read;
 	}
@@ -78,9 +79,9 @@ public:
 
 	virtual bool close()
 	{
-#ifdef DEBUG
+#ifdef DEBUG_READ
 		printf("VipsKakaduSource: close()\n");
-#endif /*DEBUG*/
+#endif /*DEBUG_READ*/
 
 		VIPS_UNREF(source);
 		return true;
@@ -608,8 +609,20 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 
 	case JP2_iccRGB_SPACE:
 	case JP2_sRGB_SPACE:
-		kakadu->interpretation = VIPS_INTERPRETATION_sRGB;
+		if (kakadu->format == VIPS_FORMAT_USHORT)
+			kakadu->interpretation = VIPS_INTERPRETATION_RGB16;
+		else
+			kakadu->interpretation = VIPS_INTERPRETATION_sRGB;
 		expected_colour_bands = 3;
+		break;
+
+	case JP2_iccLUM_SPACE:
+	case JP2_sLUM_SPACE:
+		if (kakadu->format == VIPS_FORMAT_USHORT)
+			kakadu->interpretation = VIPS_INTERPRETATION_GREY16;
+		else
+			kakadu->interpretation = VIPS_INTERPRETATION_B_W;
+		expected_colour_bands = 1;
 		break;
 
 	case JP2_EMPTY_SPACE: 		
@@ -621,7 +634,6 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 	case JP2_PhotoYCC_SPACE:
 	case JP2_YCCK_SPACE:
 	case JP2_bilevel2_SPACE:
-	case JP2_sLUM_SPACE:
 	case JP2_sYCC_SPACE:
 	case JP2_CIEJab_SPACE:
 	case JP2_esRGB_SPACE:
@@ -629,7 +641,6 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 	case JP2_YPbPr60_SPACE:
 	case JP2_YPbPr50_SPACE:
 	case JP2_esYCC_SPACE:
-	case JP2_iccLUM_SPACE:
 	case JP2_iccANY_SPACE:
 	case JP2_vendor_SPACE:
 	default:
