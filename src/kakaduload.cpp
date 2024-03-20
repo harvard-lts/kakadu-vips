@@ -579,7 +579,7 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 
 	kakadu->bands = kakadu->codestream.get_num_components();
 
-	// FIXME ... just the uint formats for now
+	// FIXME ... just 8 annd 16 bit uint for now (kakadu also supports float)
 	kakadu->bits_per_sample = -1;
 	for (i = 0; i < kakadu->bands; i++) 
 		kakadu->bits_per_sample = VIPS_MAX(kakadu->bits_per_sample, 
@@ -588,8 +588,6 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 		kakadu->format = VIPS_FORMAT_UCHAR;
 	else if (kakadu->bits_per_sample <= 16)
 		kakadu->format = VIPS_FORMAT_USHORT;
-	else if (kakadu->bits_per_sample <= 32)
-		kakadu->format = VIPS_FORMAT_UINT;
 	else {
 		vips_error(klass->nickname, "%s", _("unsupported bits per sample"));
         return -1;
@@ -754,20 +752,44 @@ vips_foreign_load_kakadu_generate(VipsRegion *out,
 
 		kdu_coords buffer_origin = kdu_coords(0, 0);
 		int row_gap = 0;
-		int suggested_increment = 0;
+		// decode 128 lines each call
+		int suggested_increment = 128 * r->width;
 
 		// we always want the whole tile
 		int max_region_pixels = 1000000000;
 
-		if (!kakadu->region_decompressor->process(data,
-				kakadu->channel_offsets,
-				kakadu->bands,
-				buffer_origin,
-				row_gap,
-				suggested_increment,
-				max_region_pixels,
-				incomplete_region,
-				new_region))
+		bool result;
+		switch (kakadu->format) {
+		case VIPS_FORMAT_UCHAR:
+			result = kakadu->region_decompressor->process(data,
+					kakadu->channel_offsets,
+					kakadu->bands,
+					buffer_origin,
+					row_gap,
+					suggested_increment,
+					max_region_pixels,
+					incomplete_region,
+					new_region);
+			break;
+
+		case VIPS_FORMAT_USHORT:
+			result = kakadu->region_decompressor->process((kdu_uint16*) data,
+					kakadu->channel_offsets,
+					kakadu->bands,
+					buffer_origin,
+					row_gap,
+					suggested_increment,
+					max_region_pixels,
+					incomplete_region,
+					new_region);
+			break;
+
+		default:
+			vips_error(klass->nickname, "%s", "unimplemented format");
+			return -1;
+		}
+
+		if (!result)
 			break;
 
 		// down by the number of generated scanlines
