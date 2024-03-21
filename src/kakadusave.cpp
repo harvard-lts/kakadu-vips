@@ -325,11 +325,10 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 	siz.set(Sdims, 0, 1, image->Xsize);
 	siz.set(Sprecision, 0, 0, (int) (vips_format_sizeof(image->BandFmt) << 3));
 
-	if (image->BandFmt == VIPS_FORMAT_FLOAT) {
+	if (image->BandFmt == VIPS_FORMAT_FLOAT)
 		// leave prec and is_signed NULL, meaning range 1.0 and signed
 		// component data
 		siz.set(Ssigned, 0, 0, true);
-	}
 	else {
 		kakadu->precisions = VIPS_ARRAY(NULL, image->Bands, int);
 		for (int i = 0; i < image->Bands; i++) 
@@ -409,7 +408,7 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 
 		char *p, *q;
 
-		for(p = options; (q = vips_break_token(p, "; ")); p = q)
+		for (p = options; (q = vips_break_token(p, "; ")); p = q)
 			if (!siz->parse_string(p)) {
 				vips_error(klass->nickname, _("unable to set option %s"), p);
 				return -1;
@@ -501,19 +500,19 @@ vips_foreign_save_kakadu_class_init(VipsForeignSaveKakaduClass *klass)
 
 	save_class->saveable = VIPS_SAVEABLE_ANY;
 
-	VIPS_ARG_INT(klass, "tile_width", 11,
-		_("Tile width"),
-		_("Tile width in pixels"),
-		VIPS_ARGUMENT_OPTIONAL_INPUT,
-		G_STRUCT_OFFSET(VipsForeignSaveKakadu, tile_width),
-		1, 32768, 512);
+	VIPS_ARG_STRING(klass, "options", 11,
+        _("Options"),
+        _("Set of Kakadu option specifications"),
+        VIPS_ARGUMENT_OPTIONAL_INPUT,
+        G_STRUCT_OFFSET(VipsForeignSaveKakadu, options),
+        NULL);
 
-	VIPS_ARG_INT(klass, "tile_height", 12,
-		_("Tile height"),
-		_("Tile height in pixels"),
+	VIPS_ARG_INT(klass, "Q", 12,
+		_("Q"),
+		_("Q factor"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
-		G_STRUCT_OFFSET(VipsForeignSaveKakadu, tile_height),
-		1, 32768, 512);
+		G_STRUCT_OFFSET(VipsForeignSaveKakadu, Q),
+		1, 100, 48);
 
 	VIPS_ARG_BOOL(klass, "lossless", 13,
 		_("Lossless"),
@@ -522,27 +521,27 @@ vips_foreign_save_kakadu_class_init(VipsForeignSaveKakaduClass *klass)
 		G_STRUCT_OFFSET(VipsForeignSaveKakadu, lossless),
 		FALSE);
 
-	VIPS_ARG_INT(klass, "Q", 14,
-		_("Q"),
-		_("Q factor"),
+	VIPS_ARG_INT(klass, "tile_width", 14,
+		_("Tile width"),
+		_("Tile width in pixels"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
-		G_STRUCT_OFFSET(VipsForeignSaveKakadu, Q),
-		1, 100, 48);
+		G_STRUCT_OFFSET(VipsForeignSaveKakadu, tile_width),
+		1, 32768, 512);
 
-	VIPS_ARG_ENUM(klass, "subsample_mode", 15,
+	VIPS_ARG_INT(klass, "tile_height", 15,
+		_("Tile height"),
+		_("Tile height in pixels"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveKakadu, tile_height),
+		1, 32768, 512);
+
+	VIPS_ARG_ENUM(klass, "subsample_mode", 16,
 		_("Subsample mode"),
 		_("Select chroma subsample operation mode"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveKakadu, subsample_mode),
 		VIPS_TYPE_FOREIGN_SUBSAMPLE,
 		VIPS_FOREIGN_SUBSAMPLE_OFF);
-
-	VIPS_ARG_STRING(klass, "options", 16,
-        _("Options"),
-        _("Set of Kakadu option specifications"),
-        VIPS_ARGUMENT_OPTIONAL_INPUT,
-        G_STRUCT_OFFSET(VipsForeignSaveKakadu, options),
-        NULL);
 
 	VIPS_ARG_BOOL(klass, "htj2k", 17,
 		_("High-throughput"),
@@ -551,7 +550,7 @@ vips_foreign_save_kakadu_class_init(VipsForeignSaveKakaduClass *klass)
 		G_STRUCT_OFFSET(VipsForeignSaveKakadu, htj2k),
 		FALSE);
 
-  VIPS_ARG_BOXED(klass, "rate", 18,
+  	VIPS_ARG_BOXED(klass, "rate", 18,
         _("Bitrate"),
         _("Bitrate per layer"),
         VIPS_ARGUMENT_OPTIONAL_INPUT,
@@ -762,6 +761,8 @@ vips_foreign_save_kakadu_target_init(VipsForeignSaveKakaduTarget *target)
  * * @tile_width: %gint for tile size
  * * @tile_height: %gint for tile size
  * * @subsample_mode: #VipsForeignSubsample, chroma subsampling mode
+ * * @htj2k: %gboolean, enable high-throughput jpeg2000
+ * * @rate: #VipsArrayInt, bitrate per layer
  *
  * Write a VIPS image to a file in JPEG2000 format.
  * The saver supports 8, 16 and 32-bit int pixel
@@ -770,8 +771,6 @@ vips_foreign_save_kakadu_target_init(VipsForeignSaveKakaduTarget *target)
  *
  * Use @options to provide a set of Kakadu options, separated by spaces or
  * semicolons. For example `"Clayers=12;Creversible=yes;Qfactor=20"`.
- *
- * Use @rate to specify a bitrate per layer. 
  *
  * Use @Q to set the compression quality factor. The default value
  * produces file with approximately the same size as regular JPEG Q 75.
@@ -787,6 +786,9 @@ vips_foreign_save_kakadu_target_init(VipsForeignSaveKakaduTarget *target)
  *
  * Set @htj2k to enable high-throughput jpeg2000 compression. This option is
  * enabled automatically if a filename ending in `.jph` is detected.
+ *
+ * Use @rate to set the bitrate for each layer. A one-element array will set
+ * the bitrate for all layers.
  *
  * This operation always writes a pyramid.
  *
@@ -816,11 +818,14 @@ vips_kakadusave(VipsImage *in, const char *filename, ...)
  *
  * Optional arguments:
  *
+ * * @options: %gchararray, set of Kakadu options
  * * @Q: %gint, quality factor
  * * @lossless: %gboolean, enables lossless compression
  * * @tile_width: %gint for tile size
  * * @tile_height: %gint for tile size
  * * @subsample_mode: #VipsForeignSubsample, chroma subsampling mode
+ * * @htj2k: %gboolean, enable high-throughput jpeg2000
+ * * @rate: #VipsArrayInt, bitrate per layer
  *
  * As vips_kakadusave(), but save to a target.
  *
@@ -864,11 +869,14 @@ vips_kakadusave_buffer(VipsImage *in, void **buf, size_t *len, ...)
  *
  * Optional arguments:
  *
+ * * @options: %gchararray, set of Kakadu options
  * * @Q: %gint, quality factor
  * * @lossless: %gboolean, enables lossless compression
  * * @tile_width: %gint for tile size
  * * @tile_height: %gint for tile size
  * * @subsample_mode: #VipsForeignSubsample, chroma subsampling mode
+ * * @htj2k: %gboolean, enable high-throughput jpeg2000
+ * * @rate: #VipsArrayInt, bitrate per layer
  *
  * As vips_kakadusave(), but save to a target.
  *
