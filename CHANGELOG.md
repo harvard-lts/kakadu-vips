@@ -11,6 +11,7 @@
 - add "rate" arg to save
 - add icc profile save
 - fix 16-bit load and save
+- add float load and save
 
 ## 2024/1/11 1.0
 

@@ -588,6 +588,8 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 		kakadu->format = VIPS_FORMAT_UCHAR;
 	else if (kakadu->bits_per_sample <= 16)
 		kakadu->format = VIPS_FORMAT_USHORT;
+	else if (kakadu->bits_per_sample <= 32)
+		kakadu->format = VIPS_FORMAT_FLOAT;
 	else {
 		vips_error(klass->nickname, "%s", _("unsupported bits per sample"));
         return -1;
@@ -609,6 +611,8 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 	case JP2_sRGB_SPACE:
 		if (kakadu->format == VIPS_FORMAT_USHORT)
 			kakadu->interpretation = VIPS_INTERPRETATION_RGB16;
+		else if (kakadu->format == VIPS_FORMAT_FLOAT)
+			kakadu->interpretation = VIPS_INTERPRETATION_scRGB;
 		else
 			kakadu->interpretation = VIPS_INTERPRETATION_sRGB;
 		expected_colour_bands = 3;
@@ -774,6 +778,18 @@ vips_foreign_load_kakadu_generate(VipsRegion *out,
 
 		case VIPS_FORMAT_USHORT:
 			result = kakadu->region_decompressor->process((kdu_uint16*) data,
+					kakadu->channel_offsets,
+					kakadu->bands,
+					buffer_origin,
+					row_gap,
+					suggested_increment,
+					max_region_pixels,
+					incomplete_region,
+					new_region);
+			break;
+
+		case VIPS_FORMAT_FLOAT:
+			result = kakadu->region_decompressor->process((float*) data,
 					kakadu->channel_offsets,
 					kakadu->bands,
 					buffer_origin,

@@ -227,6 +227,7 @@ vips_foreign_save_kakadu_write_block(VipsRegion *region, VipsRect *area,
     void *user)
 {
     VipsForeignSaveKakadu *kakadu = (VipsForeignSaveKakadu *) user;
+	VipsObjectClass *klass = VIPS_OBJECT_GET_CLASS(kakadu);
 	VipsImage *image = region->im;
 	VipsRect *r = &region->valid;
 
@@ -243,7 +244,18 @@ vips_foreign_save_kakadu_write_block(VipsRegion *region, VipsRect *area,
 	const int *sample_gaps = NULL;
 	const int *row_gaps = NULL;
 
-	if (image->BandFmt == VIPS_FORMAT_USHORT)
+	switch (image->BandFmt) {
+	case VIPS_FORMAT_UCHAR:
+		kakadu->compressor->push_stripe(
+			(kdu_byte *) VIPS_REGION_ADDR(region, r->left, r->top),
+			kakadu->stripe_heights,
+			sample_offsets,
+			sample_gaps,
+			row_gaps,
+			kakadu->precisions);
+		break;
+
+	case VIPS_FORMAT_USHORT:
 		kakadu->compressor->push_stripe(
 			(kdu_int16 *) VIPS_REGION_ADDR(region, r->left, r->top),
 			kakadu->stripe_heights,
@@ -252,14 +264,23 @@ vips_foreign_save_kakadu_write_block(VipsRegion *region, VipsRect *area,
 			row_gaps,
 			kakadu->precisions,
 			kakadu->is_signed);
-	else
+		break;
+
+	case VIPS_FORMAT_FLOAT:
 		kakadu->compressor->push_stripe(
-			(kdu_byte *) VIPS_REGION_ADDR(region, r->left, r->top),
+			(float *) VIPS_REGION_ADDR(region, r->left, r->top),
 			kakadu->stripe_heights,
 			sample_offsets,
 			sample_gaps,
 			row_gaps,
-			kakadu->precisions);
+			kakadu->precisions,
+			kakadu->is_signed);
+		break;
+
+	default:
+		vips_error(klass->nickname, _("unimplemented format"));
+		return -1;
+	}
 
 	return 0;
 }
@@ -288,11 +309,6 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 
 	image = save->ready;
 
-	if (!vips_band_format_isint(image->BandFmt)) {
-		vips_error(klass->nickname, "%s", _("not an integer format"));
-		return -1;
-	}
-
 	// see if we have something like a jph filename and enable high-throughput
 	// compression
 	const char *filename = 
@@ -303,21 +319,28 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 
 	kakadu->stripe_heights = VIPS_ARRAY(NULL, image->Bands, int);
 
-	kakadu->precisions = VIPS_ARRAY(NULL, image->Bands, int);
-	for (int i = 0; i < image->Bands; i++) 
-		kakadu->precisions[i] = vips_format_sizeof(image->BandFmt) << 3;
-
-	kakadu->is_signed = VIPS_ARRAY(NULL, image->Bands, bool);
-	for (int i = 0; i < image->Bands; i++) 
-		kakadu->is_signed[i] = false;
-
 	siz_params siz;
-
 	siz.set(Scomponents, 0, 0, image->Bands);
 	siz.set(Sdims, 0, 0, image->Ysize);
 	siz.set(Sdims, 0, 1, image->Xsize);
 	siz.set(Sprecision, 0, 0, (int) (vips_format_sizeof(image->BandFmt) << 3));
-	siz.set(Ssigned, 0, 0, false);
+
+	if (image->BandFmt == VIPS_FORMAT_FLOAT) {
+		// leave prec and is_signed NULL, meaning range 1.0 and signed
+		// component data
+		siz.set(Ssigned, 0, 0, true);
+	}
+	else {
+		kakadu->precisions = VIPS_ARRAY(NULL, image->Bands, int);
+		for (int i = 0; i < image->Bands; i++) 
+			kakadu->precisions[i] = vips_format_sizeof(image->BandFmt) << 3;
+
+		kakadu->is_signed = VIPS_ARRAY(NULL, image->Bands, bool);
+		for (int i = 0; i < image->Bands; i++) 
+			kakadu->is_signed[i] = false;
+
+		siz.set(Ssigned, 0, 0, false);
+	}
 
 	// enable high throughput jp2 compression
 	if (kakadu->htj2k)
