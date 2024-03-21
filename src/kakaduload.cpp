@@ -752,7 +752,7 @@ vips_foreign_load_kakadu_generate(VipsRegion *out,
 
 		kdu_coords buffer_origin = kdu_coords(0, 0);
 		int row_gap = 0;
-		// decode 128 lines each call
+		// decode c. 128 lines each call
 		int suggested_increment = 128 * r->width;
 
 		// we always want the whole tile

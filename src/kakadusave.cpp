@@ -18,7 +18,7 @@
 
 using namespace kdu_supp; // includes the core namespace
 
-// so 32 bits on a log2 scale
+// ie. 2^32 on a log2 scale
 #define MAX_LAYER_COUNT (32)
 
 /* A VipsTarget as a Kakadu output object. This keeps the reference
@@ -180,6 +180,8 @@ typedef struct _VipsForeignSaveKakadu {
 	VipsRegion *strip;
 	VipsPel *tile_buffer;
 	int *stripe_heights;
+	int *precisions;
+	bool *is_signed;
 
 	/* If we need to subsample during unpacking.
 	 */
@@ -214,6 +216,8 @@ vips_foreign_save_kakadu_dispose(GObject *gobject)
 	VIPS_FREE(kakadu->tile_buffer);
 	VIPS_FREE(kakadu->accumulate);
 	VIPS_FREE(kakadu->stripe_heights);
+	VIPS_FREE(kakadu->precisions);
+	VIPS_FREE(kakadu->is_signed);
 
 	G_OBJECT_CLASS(vips_foreign_save_kakadu_parent_class)->dispose(gobject);
 }
@@ -235,9 +239,27 @@ vips_foreign_save_kakadu_write_block(VipsRegion *region, VipsRect *area,
 	for (int i = 0; i < image->Bands; i++) 
 		kakadu->stripe_heights[i] = r->height;
 
-	kakadu->compressor->push_stripe(
-		(kdu_byte *) VIPS_REGION_ADDR(region, r->left, r->top),
-		kakadu->stripe_heights);
+	const int *sample_offsets = NULL;
+	const int *sample_gaps = NULL;
+	const int *row_gaps = NULL;
+
+	if (image->BandFmt == VIPS_FORMAT_USHORT)
+		kakadu->compressor->push_stripe(
+			(kdu_int16 *) VIPS_REGION_ADDR(region, r->left, r->top),
+			kakadu->stripe_heights,
+			sample_offsets,
+			sample_gaps,
+			row_gaps,
+			kakadu->precisions,
+			kakadu->is_signed);
+	else
+		kakadu->compressor->push_stripe(
+			(kdu_byte *) VIPS_REGION_ADDR(region, r->left, r->top),
+			kakadu->stripe_heights,
+			sample_offsets,
+			sample_gaps,
+			row_gaps,
+			kakadu->precisions);
 
 	return 0;
 }
@@ -280,6 +302,14 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 		kakadu->htj2k = true;
 
 	kakadu->stripe_heights = VIPS_ARRAY(NULL, image->Bands, int);
+
+	kakadu->precisions = VIPS_ARRAY(NULL, image->Bands, int);
+	for (int i = 0; i < image->Bands; i++) 
+		kakadu->precisions[i] = vips_format_sizeof(image->BandFmt) << 3;
+
+	kakadu->is_signed = VIPS_ARRAY(NULL, image->Bands, bool);
+	for (int i = 0; i < image->Bands; i++) 
+		kakadu->is_signed[i] = false;
 
 	siz_params siz;
 

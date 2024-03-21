@@ -10,8 +10,7 @@
 - add `ORGgen_tlm` support 
 - add "rate" arg to save
 - add icc profile save
-- add rgb16 and grey16 interpretation for load
-- fix 16-bit load
+- fix 16-bit load and save
 
 ## 2024/1/11 1.0
 
