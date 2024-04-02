@@ -36,7 +36,7 @@ $ pytest
 ============================= test session starts ==============================
 platform linux -- Python 3.11.6, pytest-7.4.0, pluggy-1.2.0
 rootdir: /home/john/GIT/kakadu-vips
-collected 4 items                                                              
+collected 4 items
 
 test/test_kakaduload.py ...                                              [ 75%]
 test/test_kakadusave.py .                                                [100%]
@@ -44,18 +44,17 @@ test/test_kakadusave.py .                                                [100%]
 ============================== 4 passed in 0.54s ===============================
 ```
 
-## TODO
+## Known cavets & limitations
 
-- kakadu does not seem to support icc profile save
+- Gamma ad clipping issues with float images - see
+  https://github.com/harvard-lts/kakadu-vips/issues/12
 
-- 16 bit and float images should work, but need testing
+- Alpha channel should work, but needs testing
 
-- alpha images should work, but need testing
+- CMYK, lab and greyscale should work, but need testing
 
-- cmyk, lab and greyscale should work, but need testing
+- Palettised images should work, but need testing
 
-- palettised images should work, but need testing
+- Chroma subsampling should work, but needs testing
 
-- chroma subsampling should work, but needs testing
-
-- multispectral images should work, but need testing
+- Multispectral images should work, but need testing
