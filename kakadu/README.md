@@ -20,16 +20,9 @@ See `v8_3-02172N/Compiling_Instructions.txt` for detailed notes.
 
 ## Enable high throughput jp2k
 
-You may have HTJP2K enabled already, if not, edit
-`coresys/fast_coding/fbc_common.h` and uncomment `FBC_ENABLED`.
-You can avoid editing the source by using `make CXXFLAGS=-DFBC_ENABLED ...`
-when building coresys, of course.
-
-```shell
-cd v8_3-02172N
-mv srclib_ht srclib_ht_noopt
-cp -r altlib_ht_opt srclib_ht
-```
+Check the instructions in the Kakadu SDK documentation and your license if
+you need to enable HTJ2K before compiling the Kakadu libraries, and if you
+are licensed to do so.
 
 ## Prerequisites
 
