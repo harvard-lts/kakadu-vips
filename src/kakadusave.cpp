@@ -244,41 +244,46 @@ vips_foreign_save_kakadu_write_block(VipsRegion *region, VipsRect *area,
 	const int *sample_gaps = NULL;
 	const int *row_gaps = NULL;
 
-	switch (image->BandFmt) {
-	case VIPS_FORMAT_UCHAR:
-		kakadu->compressor->push_stripe(
-			(kdu_byte *) VIPS_REGION_ADDR(region, r->left, r->top),
-			kakadu->stripe_heights,
-			sample_offsets,
-			sample_gaps,
-			row_gaps,
-			kakadu->precisions);
-		break;
+	try {
+		switch (image->BandFmt) {
+		case VIPS_FORMAT_UCHAR:
+			kakadu->compressor->push_stripe(
+				(kdu_byte *) VIPS_REGION_ADDR(region, r->left, r->top),
+				kakadu->stripe_heights,
+				sample_offsets,
+				sample_gaps,
+				row_gaps,
+				kakadu->precisions);
+			break;
 
-	case VIPS_FORMAT_USHORT:
-		kakadu->compressor->push_stripe(
-			(kdu_int16 *) VIPS_REGION_ADDR(region, r->left, r->top),
-			kakadu->stripe_heights,
-			sample_offsets,
-			sample_gaps,
-			row_gaps,
-			kakadu->precisions,
-			kakadu->is_signed);
-		break;
+		case VIPS_FORMAT_USHORT:
+			kakadu->compressor->push_stripe(
+				(kdu_int16 *) VIPS_REGION_ADDR(region, r->left, r->top),
+				kakadu->stripe_heights,
+				sample_offsets,
+				sample_gaps,
+				row_gaps,
+				kakadu->precisions,
+				kakadu->is_signed);
+			break;
 
-	case VIPS_FORMAT_FLOAT:
-		kakadu->compressor->push_stripe(
-			(float *) VIPS_REGION_ADDR(region, r->left, r->top),
-			kakadu->stripe_heights,
-			sample_offsets,
-			sample_gaps,
-			row_gaps,
-			kakadu->precisions,
-			kakadu->is_signed);
-		break;
+		case VIPS_FORMAT_FLOAT:
+			kakadu->compressor->push_stripe(
+				(float *) VIPS_REGION_ADDR(region, r->left, r->top),
+				kakadu->stripe_heights,
+				sample_offsets,
+				sample_gaps,
+				row_gaps,
+				kakadu->precisions,
+				kakadu->is_signed);
+			break;
 
-	default:
-		vips_error(klass->nickname, _("unimplemented format"));
+		default:
+			vips_error(klass->nickname, _("unimplemented format"));
+			return -1;
+		}
+	}
+	catch (kdu_exception e) {
 		return -1;
 	}
 
@@ -297,181 +302,187 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 	VipsForeignSave *save = (VipsForeignSave *) object;
 	VipsForeignSaveKakadu *kakadu = (VipsForeignSaveKakadu *) object;
 
-	VipsImage *image;
-
-	// install error and warn messages
-	kdu_customize_errors(&vips_foreign_kakadu_error_handler);
-	kdu_customize_warnings(&vips_foreign_kakadu_warn_handler);
-
-	if (VIPS_OBJECT_CLASS(vips_foreign_save_kakadu_parent_class)->
-		build(object))
-		return -1;
-
-	image = save->ready;
-
-	// see if we have something like a jph filename and enable high-throughput
-	// compression
-	const char *filename = 
-		vips_connection_filename(VIPS_CONNECTION(kakadu->target));
-	if (filename && 
-		vips_filename_suffix_match(filename, vips__jph_suffix))
-		kakadu->htj2k = true;
-
-	kakadu->stripe_heights = VIPS_ARRAY(NULL, image->Bands, int);
-
-	siz_params siz;
-	siz.set(Scomponents, 0, 0, image->Bands);
-	siz.set(Sdims, 0, 0, image->Ysize);
-	siz.set(Sdims, 0, 1, image->Xsize);
-	siz.set(Sprecision, 0, 0, (int) (vips_format_sizeof(image->BandFmt) << 3));
-
-	if (image->BandFmt == VIPS_FORMAT_FLOAT)
-		// leave prec and is_signed NULL, meaning range 1.0 and signed
-		// component data
-		siz.set(Ssigned, 0, 0, true);
-	else {
-		kakadu->precisions = VIPS_ARRAY(NULL, image->Bands, int);
-		for (int i = 0; i < image->Bands; i++) 
-			kakadu->precisions[i] = vips_format_sizeof(image->BandFmt) << 3;
-
-		kakadu->is_signed = VIPS_ARRAY(NULL, image->Bands, bool);
-		for (int i = 0; i < image->Bands; i++) 
-			kakadu->is_signed[i] = false;
-
-		siz.set(Ssigned, 0, 0, false);
-	}
-
-	// enable high throughput jp2 compression
-	if (kakadu->htj2k)
-		siz.set(Scap, 0, 0, Scap_P15);
-
-	// finalize to complete other fields ... has to be a reference
-	kdu_params *siz_ref = &siz; 
-	siz_ref->finalize();
-
-	// a kdu_compressed_target
-	kakadu->kakadu_target = new VipsKakaduTarget();
-	kakadu->kakadu_target->open(kakadu->target);
-
-	jp2_family_tgt target;
-	target.open(kakadu->kakadu_target);
-
-	jp2_target output;
-	output.open(&target);
-
-	// set image properties
-	jp2_dimensions dims = output.access_dimensions(); 
-	dims.init(&siz);
-
-	jp2_colour colr = output.access_colour();
-
-	if (save->profile) {
-		// init colour from supplied profile
-		VipsBlob *blob;
-		if (vips_profile_load(save->profile, &blob, NULL))
-			return -1;
-		if (!blob)
+	// any kakadu method can throw a kdu_exception ... we must catch these 
+	// and return an error instead
+	//
+	// see VipsForeignKakaduError::flush()
+	try {
+		if (VIPS_OBJECT_CLASS(vips_foreign_save_kakadu_parent_class)->
+			build(object))
 			return -1;
 
-		size_t length;
-		const void *data = vips_blob_get(blob, &length);
+		VipsImage *image = save->ready;
 
-		colr.init((kdu_byte *) data);
+		// see if we have something like a jph filename and enable 
+		// high-throughput compression
+		const char *filename = 
+			vips_connection_filename(VIPS_CONNECTION(kakadu->target));
+		if (filename && 
+			vips_filename_suffix_match(filename, vips__jph_suffix))
+			kakadu->htj2k = true;
 
-		vips_area_unref((VipsArea *) blob);
-	}
-	else if (vips_image_get_typeof(image, VIPS_META_ICC_NAME)) {
-		// init colour from embedded ICC profile
-		size_t length;
-		const void *data;
-		if (vips_image_get_blob(image, VIPS_META_ICC_NAME, &data, &length))
-			return -1;
+		kakadu->stripe_heights = VIPS_ARRAY(NULL, image->Bands, int);
 
-		colr.init((kdu_byte *) data);
-	}
-	else
-		// init colour from image metadata
-		colr.init((image->Bands >= 3) ? JP2_sRGB_SPACE : JP2_sLUM_SPACE);
+		siz_params siz;
+		siz.set(Scomponents, 0, 0, image->Bands);
+		siz.set(Sdims, 0, 0, image->Ysize);
+		siz.set(Sdims, 0, 1, image->Xsize);
+		siz.set(Sprecision, 0, 0, 
+			(int) (vips_format_sizeof(image->BandFmt) << 3));
 
-	jp2_resolution res = output.access_resolution();
-	res.init(image->Xres / image->Yres);
-	// kakadu works in pixels per metre
-	res.set_resolution((float) image->Yres * 1000.0, false);
+		if (image->BandFmt == VIPS_FORMAT_FLOAT)
+			// leave prec and is_signed NULL, meaning range 1.0 and signed
+			// component data
+			siz.set(Ssigned, 0, 0, true);
+		else {
+			kakadu->precisions = VIPS_ARRAY(NULL, image->Bands, int);
+			for (int i = 0; i < image->Bands; i++) 
+				kakadu->precisions[i] = vips_format_sizeof(image->BandFmt) << 3;
 
-	// serialise the image into a codestream
-	kdu_codestream codestream; 
-	codestream.create(&siz, &output);
+			kakadu->is_signed = VIPS_ARRAY(NULL, image->Bands, bool);
+			for (int i = 0; i < image->Bands; i++) 
+				kakadu->is_signed[i] = false;
 
-	if (vips_object_argument_isset(object, "options")) {
-		siz_params *siz = codestream.access_siz();
-		g_autofree char *options = g_strdup(kakadu->options);
-
-		char *p, *q;
-
-		for (p = options; (q = vips_break_token(p, "; ")); p = q)
-			if (!siz->parse_string(p)) {
-				vips_error(klass->nickname, _("unable to set option %s"), p);
-				return -1;
-			}
-	}
-
-    output.write_header();
-    output.open_codestream(true);
-
-	kakadu->compressor = new kdu_stripe_compressor();
-
-	// 16 seems like a sensible limit ... we want to avoid overcommitting
-	// thread resources if we can
-	int n_threads = VIPS_MIN(16, vips_concurrency_get());
-
-	kdu_thread_env env;
-	env.create();
-	for (int i = 0; i < n_threads; i++)
-		if (!env.add_thread()) {
-			vips_error(klass->nickname, "%s", "thread create failed");
-			return -1;
+			siz.set(Ssigned, 0, 0, false);
 		}
 
-	// FIXME ... need to check vector lengths when we add more array args
-	int num_layer_specs = kakadu->rate ? kakadu->rate->n : 0;
-	kdu_long layer_sizes[MAX_LAYER_COUNT] = { 0 };
-	for (int i = 0; i < num_layer_specs; i++) 
-		layer_sizes[i] = VIPS_IMAGE_N_PELS(image) * 
-			0.125 * ((int *) kakadu->rate->data)[i];
+		// enable high throughput jp2 compression
+		if (kakadu->htj2k)
+			siz.set(Scap, 0, 0, Scap_P15);
 
-	const kdu_uint16 *layer_slopes = NULL;
+		// finalize to complete other fields ... has to be a reference
+		kdu_params *siz_ref = &siz; 
+		siz_ref->finalize();
 
-	kdu_uint16 min_slope_threshold = 0;
-	bool no_auto_complexity_control = false;
-	bool force_precise = false;
-	bool record_layer_info_in_comment = true;
-	double size_tolerance = 0.0;
-	int num_components = 0;
-	bool want_fastest = false;
+		// a kdu_compressed_target
+		kakadu->kakadu_target = new VipsKakaduTarget();
+		kakadu->kakadu_target->open(kakadu->target);
 
-	kakadu->compressor->start(codestream, 
-		num_layer_specs,
-		layer_sizes,
-		layer_slopes,
-		min_slope_threshold,
-		no_auto_complexity_control,
-		force_precise,
-		record_layer_info_in_comment,
-		size_tolerance,
-		num_components,
-		want_fastest,
-		&env);
+		jp2_family_tgt target;
+		target.open(kakadu->kakadu_target);
 
-	if (vips_sink_disc(image, vips_foreign_save_kakadu_write_block, kakadu))
+		jp2_target output;
+		output.open(&target);
+
+		// set image properties
+		jp2_dimensions dims = output.access_dimensions(); 
+		dims.init(&siz);
+
+		jp2_colour colr = output.access_colour();
+
+		if (save->profile) {
+			// init colour from supplied profile
+			VipsBlob *blob;
+			if (vips_profile_load(save->profile, &blob, NULL))
+				return -1;
+			if (!blob)
+				return -1;
+
+			size_t length;
+			const void *data = vips_blob_get(blob, &length);
+
+			colr.init((kdu_byte *) data);
+
+			vips_area_unref((VipsArea *) blob);
+		}
+		else if (vips_image_get_typeof(image, VIPS_META_ICC_NAME)) {
+			// init colour from embedded ICC profile
+			size_t length;
+			const void *data;
+			if (vips_image_get_blob(image, VIPS_META_ICC_NAME, &data, &length))
+				return -1;
+
+			colr.init((kdu_byte *) data);
+		}
+		else
+			// init colour from image metadata
+			colr.init((image->Bands >= 3) ? JP2_sRGB_SPACE : JP2_sLUM_SPACE);
+
+		jp2_resolution res = output.access_resolution();
+		res.init(image->Xres / image->Yres);
+		// kakadu works in pixels per metre
+		res.set_resolution((float) image->Yres * 1000.0, false);
+
+		// serialise the image into a codestream
+		kdu_codestream codestream; 
+		codestream.create(&siz, &output);
+
+		if (vips_object_argument_isset(object, "options")) {
+			siz_params *siz = codestream.access_siz();
+			g_autofree char *options = g_strdup(kakadu->options);
+
+			char *p, *q;
+
+			for (p = options; (q = vips_break_token(p, "; ")); p = q)
+				if (!siz->parse_string(p)) {
+					vips_error(klass->nickname, 
+						_("unable to set option %s"), p);
+					return -1;
+				}
+		}
+
+		output.write_header();
+		output.open_codestream(true);
+
+		kakadu->compressor = new kdu_stripe_compressor();
+
+		// 16 seems like a sensible limit ... we want to avoid overcommitting
+		// thread resources if we can
+		int n_threads = VIPS_MIN(16, vips_concurrency_get());
+
+		kdu_thread_env env;
+		env.create();
+		for (int i = 0; i < n_threads; i++)
+			if (!env.add_thread()) {
+				vips_error(klass->nickname, "%s", "thread create failed");
+				return -1;
+			}
+
+		// FIXME ... need to check vector lengths when we add more array args
+		int num_layer_specs = kakadu->rate ? kakadu->rate->n : 0;
+		kdu_long layer_sizes[MAX_LAYER_COUNT] = { 0 };
+		for (int i = 0; i < num_layer_specs; i++) 
+			layer_sizes[i] = VIPS_IMAGE_N_PELS(image) * 
+				0.125 * ((int *) kakadu->rate->data)[i];
+
+		const kdu_uint16 *layer_slopes = NULL;
+
+		kdu_uint16 min_slope_threshold = 0;
+		bool no_auto_complexity_control = false;
+		bool force_precise = false;
+		bool record_layer_info_in_comment = true;
+		double size_tolerance = 0.0;
+		int num_components = 0;
+		bool want_fastest = false;
+
+		kakadu->compressor->start(codestream, 
+			num_layer_specs,
+			layer_sizes,
+			layer_slopes,
+			min_slope_threshold,
+			no_auto_complexity_control,
+			force_precise,
+			record_layer_info_in_comment,
+			size_tolerance,
+			num_components,
+			want_fastest,
+			&env);
+
+		if (vips_sink_disc(image, vips_foreign_save_kakadu_write_block, kakadu))
+			return -1;
+
+		kakadu->compressor->finish();
+
+		codestream.destroy();
+		output.close();
+
+		if (vips_target_end(kakadu->target))
+			return -1;
+	}
+	catch (kdu_exception e) {
+		// the message has been handled already
 		return -1;
-
-	kakadu->compressor->finish();
-
-	codestream.destroy();
-	output.close();
-
-	if (vips_target_end(kakadu->target))
-		return -1;
+	}
 
 	return 0;
 }

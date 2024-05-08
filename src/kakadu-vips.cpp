@@ -18,6 +18,10 @@ g_module_check_init(GModule *module)
 
 	g_module_make_resident(module);
 
+	// install error and warn loggers 
+	kdu_customize_errors(&vips_foreign_kakadu_error_handler);
+	kdu_customize_warnings(&vips_foreign_kakadu_warn_handler);
+
 	return NULL; 
 }
 }

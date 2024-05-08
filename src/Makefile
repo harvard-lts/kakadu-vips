@@ -4,21 +4,11 @@ OUT = vips-kakadu.so
 
 all release debug: $(OUT)
 
-# object files
-OBJS = kakadu-vips.o kakaduload.o kakadusave.o
-
-# source files
-SRC = $(OBJS:.o=.cpp) 
-
-# headers
+SRCS = kakaduload.cpp kakadusave.cpp kakadu-vips.cpp 
 HEADERS = kakadu.h
-
-$(SRC): $(HEADERS)
-
-ALL = $(SRC) $(HEADERS)
+OBJS = $(SRCS:.cpp=.o)
 
 CXXFLAGS = 
-
 CXXFLAGS += -shared -fPIC 
 CPPFLAGS += `pkg-config vips --cflags`
 LDFLAGS += `pkg-config vips --libs`
@@ -41,8 +31,16 @@ $(OUT): $(OBJS)
 # must link C++ plugins with the C++ compiler
 	$(CXX) -o $(OUT) -shared $(OBJS) $(LDFLAGS)
 
+depend: .depend
+
+.depend: $(SRCS) $(HEADERS)
+	$(CXX) $(CPPFLAGS) -MM $^ >.depend;
+
 clean: 
 	$(RM) $(OBJS) 
+
+distclean: clean
+	$(RM) *~ .depend
 
 tags: $(ALL)
 	ctags $(ALL)
@@ -57,3 +55,4 @@ install: $(OUT)
 	-mkdir -p $(PLUGIN_DIR)
 	-cp $(OUT) $(PLUGIN_DIR)
 
+include .depend

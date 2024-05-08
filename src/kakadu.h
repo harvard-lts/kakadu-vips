@@ -58,7 +58,7 @@ int vips_kakadusave_buffer(VipsImage *in, void **buf, size_t *len, ...);
 int vips_kakadusave_target(VipsImage *in, VipsTarget *target, ...);
 }
 
-class VipsForeignKakaduError : public kdu_core::kdu_message {
+class VipsForeignKakaduError : public kdu_core::kdu_thread_safe_message {
 public:
     void 
 	put_text(const char *string)
@@ -70,18 +70,24 @@ public:
 	flush(bool end_of_message)
 	{
 		if (end_of_message) {
+
 			vips_error("VipsForeignKakadu", "%s", 
 				std::accumulate(strings.begin(), 
-				   			    strings.end(), 
-							    std::string("")).c_str());
-			strings.clear();
+					            strings.end(), 
+					            std::string("")).c_str());
+
+			// without an exception, the process will be terminated when this
+			// call returns ... we must throw something of type
+			// kdu_exception (an int)
+			throw -1;
 		}
 	}
+
 private:
     std::vector<std::string> strings;
 };
 
-class VipsForeignKakaduWarn : public kdu_core::kdu_message {
+class VipsForeignKakaduWarn : public kdu_core::kdu_thread_safe_message {
 public:
     void 
 	put_text(const char *string)
@@ -99,6 +105,7 @@ public:
 			strings.clear();
 		}
 	}
+
 private:
     std::vector<std::string> strings;
 };

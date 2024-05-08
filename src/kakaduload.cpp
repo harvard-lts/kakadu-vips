@@ -203,10 +203,6 @@ vips_foreign_load_kakadu_build(VipsObject *object)
 	printf("vips_foreign_load_kakadu_build:\n");
 #endif /*DEBUG*/
 
-	// install error and warn messages
-	kdu_customize_errors(&vips_foreign_kakadu_error_handler);
-	kdu_customize_warnings(&vips_foreign_kakadu_warn_handler);
-
 	kakadu->kakadu_source = new VipsKakaduSource(kakadu->vips_source);
 
 	// read bytes and image data into these
@@ -483,193 +479,199 @@ vips_foreign_load_kakadu_header(VipsForeignLoad *load)
 	printf("vips_foreign_load_kakadu_header:\n");
 #endif /*DEBUG*/
 
-	kakadu->kakadu_source->rewind();
+	try {
+		kakadu->kakadu_source->rewind();
 
-	kakadu->input->open(kakadu->kakadu_source);
-	if (kakadu->source->open(kakadu->input, true) <= 0) {
-		vips_error(klass->nickname,
-			"%s", _("raw codec load not implemented"));
-		return -1;
-	}
-
-#ifdef DEBUG
-	printf("vips_foreign_load_kakadu_header: opened as jpx\n");
-#endif /*DEBUG*/
-
-	kakadu->layer = kakadu->source->access_layer(0);
-	kakadu->resolution = kakadu->layer.access_resolution();
-	kakadu->colour = kakadu->layer.access_colour(0);
-	kakadu->layer_size = kakadu->layer.get_layer_size();
-
-	kakadu->channels = kakadu->layer.access_channels();
-	if (!kakadu->channels.get_colour_mapping(0, 
-			kakadu->cmp, 
-			kakadu->lut, 
-			kakadu->stream_id, 
-			kakadu->fmt)) {
-		kdu_uint16 key;
-		kakadu->channels.get_non_colour_mapping(0, 
-			key,
-			kakadu->cmp, 
-			kakadu->lut, 
-			kakadu->stream_id, 
-			kakadu->fmt);
-	}
-	kakadu->codestream_source = 
-		kakadu->source->access_codestream(kakadu->stream_id);
-	kakadu->palette = kakadu->codestream_source.access_palette();
-	kakadu->dimensions = kakadu->codestream_source.access_dimensions();
-
-	/* Try to guess how much we can reduce the image by (ie. n_pages)
-	 * from the size of the first layer.
-	 *
-	 * Aim for no reduction possible, or a max reduction which will leave at 
-	 * least 128 pixels on the shortest axis.
-	 */
-	int full_width = kakadu->layer_size.get_x();
-	int full_height = kakadu->layer_size.get_y();
-	double max_size_bits = log(VIPS_MIN(full_width, full_height)) / log(2);
-	kakadu->n_pages = VIPS_MAX(1, max_size_bits - 6);
-
-	if (kakadu->page >= kakadu->n_pages) {
-		vips_error(klass->nickname,
-			_("page should be less than %d"), kakadu->n_pages);
-		return -1;
-	}
-
-	// and we need a codestream to get bitdepth, width, height, etc.
-	kdu_compressed_source *compressed_source = 
-		kakadu->codestream_source.open_stream();
-	kakadu->codestream.create(compressed_source);
-
-	vips_foreign_load_kakadu_set_error_behaviour(kakadu);
-
-	// select all bands
-	int first_component = 0;
-	int max_components = 0;
-
-	// use pages to pick a reduction factor
-	int discard_levels = kakadu->page;
-
-	// load all image layers
-	int max_layers = 0;
-
-	// no region of interest
-	const kdu_dims *region_of_interest = NULL;
-
-	kakadu->codestream.apply_input_restrictions(first_component,
-		max_components,
-		discard_levels,
-		max_layers,
-		region_of_interest);
-
-	// random tile access needs a persistent codestream 
-	kakadu->codestream.set_persistent();
-
-	// get the decoded image dimensions
-	kdu_dims dims;
-	kakadu->codestream.get_dims(0, dims);
-	kakadu->width = dims.size.x;
-	kakadu->height = dims.size.y;
-
-	// get the tile size (used to size the libvips tile cache)
-	kakadu->codestream.get_tile_partition(dims);
-	kakadu->tile_width = dims.size.x;
-	kakadu->tile_height = dims.size.y;
-
-	kakadu->bands = kakadu->codestream.get_num_components();
-
-	// FIXME ... just 8 annd 16 bit uint for now (kakadu also supports float)
-	kakadu->bits_per_sample = -1;
-	for (i = 0; i < kakadu->bands; i++) 
-		kakadu->bits_per_sample = VIPS_MAX(kakadu->bits_per_sample, 
-				kakadu->codestream.get_bit_depth(i));
-	if (kakadu->bits_per_sample <= 8)
-		kakadu->format = VIPS_FORMAT_UCHAR;
-	else if (kakadu->bits_per_sample <= 16)
-		kakadu->format = VIPS_FORMAT_USHORT;
-	else if (kakadu->bits_per_sample <= 32)
-		kakadu->format = VIPS_FORMAT_FLOAT;
-	else {
-		vips_error(klass->nickname, "%s", _("unsupported bits per sample"));
-        return -1;
-	}
-
-	int expected_colour_bands;
-	switch (kakadu->colour.get_space()) {
-	case JP2_CMYK_SPACE:
-		kakadu->interpretation = VIPS_INTERPRETATION_CMYK;
-		expected_colour_bands = 4;
-		break;
-
-	case JP2_CIELab_SPACE:
-		kakadu->interpretation = VIPS_INTERPRETATION_LAB;
-		expected_colour_bands = 3;
-		break;
-
-	case JP2_iccRGB_SPACE:
-	case JP2_sRGB_SPACE:
-		if (kakadu->format == VIPS_FORMAT_USHORT)
-			kakadu->interpretation = VIPS_INTERPRETATION_RGB16;
-		else if (kakadu->format == VIPS_FORMAT_FLOAT)
-			kakadu->interpretation = VIPS_INTERPRETATION_scRGB;
-		else
-			kakadu->interpretation = VIPS_INTERPRETATION_sRGB;
-		expected_colour_bands = 3;
-		break;
-
-	case JP2_iccLUM_SPACE:
-	case JP2_sLUM_SPACE:
-		if (kakadu->format == VIPS_FORMAT_USHORT)
-			kakadu->interpretation = VIPS_INTERPRETATION_GREY16;
-		else
-			kakadu->interpretation = VIPS_INTERPRETATION_B_W;
-		expected_colour_bands = 1;
-		break;
-
-	case JP2_EMPTY_SPACE: 		
-	case JP2_CMY_SPACE:
-	case JP2_bilevel1_SPACE:
-	case JP2_YCbCr1_SPACE:
-	case JP2_YCbCr2_SPACE:
-	case JP2_YCbCr3_SPACE:
-	case JP2_PhotoYCC_SPACE:
-	case JP2_YCCK_SPACE:
-	case JP2_bilevel2_SPACE:
-	case JP2_sYCC_SPACE:
-	case JP2_CIEJab_SPACE:
-	case JP2_esRGB_SPACE:
-	case JP2_ROMMRGB_SPACE:
-	case JP2_YPbPr60_SPACE:
-	case JP2_YPbPr50_SPACE:
-	case JP2_esYCC_SPACE:
-	case JP2_iccANY_SPACE:
-	case JP2_vendor_SPACE:
-	default:
-		// unimplemented, or we're unsure
-		kakadu->interpretation = VIPS_INTERPRETATION_MULTIBAND;
-		expected_colour_bands = kakadu->channels.get_num_colours();
-		break;
-	}
-
-	// can be more with alpha etc.
-	if (expected_colour_bands > kakadu->bands) {
-		vips_error(klass->nickname,
-			"%s", _("incorrect number of colour bands for colour space"));
-		return -1;
-	}
-
-	vips_foreign_load_kakadu_get_resolution(kakadu);
+		kakadu->input->open(kakadu->kakadu_source);
+		if (kakadu->source->open(kakadu->input, true) <= 0) {
+			vips_error(klass->nickname,
+				"%s", _("raw codec load not implemented"));
+			return -1;
+		}
 
 #ifdef DEBUG
-	vips_foreign_load_kakadu_print(kakadu);
+		printf("vips_foreign_load_kakadu_header: opened as jpx\n");
 #endif /*DEBUG*/
 
-	if (vips_foreign_load_kakadu_set_header(kakadu, load->out))
-		return -1;
+		kakadu->layer = kakadu->source->access_layer(0);
+		kakadu->resolution = kakadu->layer.access_resolution();
+		kakadu->colour = kakadu->layer.access_colour(0);
+		kakadu->layer_size = kakadu->layer.get_layer_size();
 
-	VIPS_SETSTR(load->out->filename,
-		vips_connection_filename(VIPS_CONNECTION(kakadu->vips_source)));
+		kakadu->channels = kakadu->layer.access_channels();
+		if (!kakadu->channels.get_colour_mapping(0, 
+				kakadu->cmp, 
+				kakadu->lut, 
+				kakadu->stream_id, 
+				kakadu->fmt)) {
+			kdu_uint16 key;
+			kakadu->channels.get_non_colour_mapping(0, 
+				key,
+				kakadu->cmp, 
+				kakadu->lut, 
+				kakadu->stream_id, 
+				kakadu->fmt);
+		}
+		kakadu->codestream_source = 
+			kakadu->source->access_codestream(kakadu->stream_id);
+		kakadu->palette = kakadu->codestream_source.access_palette();
+		kakadu->dimensions = kakadu->codestream_source.access_dimensions();
+
+		/* Try to guess how much we can reduce the image by (ie. n_pages)
+		 * from the size of the first layer.
+		 *
+		 * Aim for no reduction possible, or a max reduction which will leave 
+		 * at least 128 pixels on the shortest axis.
+		 */
+		int full_width = kakadu->layer_size.get_x();
+		int full_height = kakadu->layer_size.get_y();
+		double max_size_bits = log(VIPS_MIN(full_width, full_height)) / log(2);
+		kakadu->n_pages = VIPS_MAX(1, max_size_bits - 6);
+
+		if (kakadu->page >= kakadu->n_pages) {
+			vips_error(klass->nickname,
+				_("page should be less than %d"), kakadu->n_pages);
+			return -1;
+		}
+
+		// and we need a codestream to get bitdepth, width, height, etc.
+		kdu_compressed_source *compressed_source = 
+			kakadu->codestream_source.open_stream();
+		kakadu->codestream.create(compressed_source);
+
+		vips_foreign_load_kakadu_set_error_behaviour(kakadu);
+
+		// select all bands
+		int first_component = 0;
+		int max_components = 0;
+
+		// use pages to pick a reduction factor
+		int discard_levels = kakadu->page;
+
+		// load all image layers
+		int max_layers = 0;
+
+		// no region of interest
+		const kdu_dims *region_of_interest = NULL;
+
+		kakadu->codestream.apply_input_restrictions(first_component,
+			max_components,
+			discard_levels,
+			max_layers,
+			region_of_interest);
+
+		// random tile access needs a persistent codestream 
+		kakadu->codestream.set_persistent();
+
+		// get the decoded image dimensions
+		kdu_dims dims;
+		kakadu->codestream.get_dims(0, dims);
+		kakadu->width = dims.size.x;
+		kakadu->height = dims.size.y;
+
+		// get the tile size (used to size the libvips tile cache)
+		kakadu->codestream.get_tile_partition(dims);
+		kakadu->tile_width = dims.size.x;
+		kakadu->tile_height = dims.size.y;
+
+		kakadu->bands = kakadu->codestream.get_num_components();
+
+		// FIXME ... just 8 and 16 bit uint for now (kakadu also supports float)
+		kakadu->bits_per_sample = -1;
+		for (i = 0; i < kakadu->bands; i++) 
+			kakadu->bits_per_sample = VIPS_MAX(kakadu->bits_per_sample, 
+					kakadu->codestream.get_bit_depth(i));
+		if (kakadu->bits_per_sample <= 8)
+			kakadu->format = VIPS_FORMAT_UCHAR;
+		else if (kakadu->bits_per_sample <= 16)
+			kakadu->format = VIPS_FORMAT_USHORT;
+		else if (kakadu->bits_per_sample <= 32)
+			kakadu->format = VIPS_FORMAT_FLOAT;
+		else {
+			vips_error(klass->nickname, "%s", _("unsupported bits per sample"));
+			return -1;
+		}
+
+		int expected_colour_bands;
+		switch (kakadu->colour.get_space()) {
+		case JP2_CMYK_SPACE:
+			kakadu->interpretation = VIPS_INTERPRETATION_CMYK;
+			expected_colour_bands = 4;
+			break;
+
+		case JP2_CIELab_SPACE:
+			kakadu->interpretation = VIPS_INTERPRETATION_LAB;
+			expected_colour_bands = 3;
+			break;
+
+		case JP2_iccRGB_SPACE:
+		case JP2_sRGB_SPACE:
+			if (kakadu->format == VIPS_FORMAT_USHORT)
+				kakadu->interpretation = VIPS_INTERPRETATION_RGB16;
+			else if (kakadu->format == VIPS_FORMAT_FLOAT)
+				kakadu->interpretation = VIPS_INTERPRETATION_scRGB;
+			else
+				kakadu->interpretation = VIPS_INTERPRETATION_sRGB;
+			expected_colour_bands = 3;
+			break;
+
+		case JP2_iccLUM_SPACE:
+		case JP2_sLUM_SPACE:
+			if (kakadu->format == VIPS_FORMAT_USHORT)
+				kakadu->interpretation = VIPS_INTERPRETATION_GREY16;
+			else
+				kakadu->interpretation = VIPS_INTERPRETATION_B_W;
+			expected_colour_bands = 1;
+			break;
+
+		case JP2_EMPTY_SPACE: 		
+		case JP2_CMY_SPACE:
+		case JP2_bilevel1_SPACE:
+		case JP2_YCbCr1_SPACE:
+		case JP2_YCbCr2_SPACE:
+		case JP2_YCbCr3_SPACE:
+		case JP2_PhotoYCC_SPACE:
+		case JP2_YCCK_SPACE:
+		case JP2_bilevel2_SPACE:
+		case JP2_sYCC_SPACE:
+		case JP2_CIEJab_SPACE:
+		case JP2_esRGB_SPACE:
+		case JP2_ROMMRGB_SPACE:
+		case JP2_YPbPr60_SPACE:
+		case JP2_YPbPr50_SPACE:
+		case JP2_esYCC_SPACE:
+		case JP2_iccANY_SPACE:
+		case JP2_vendor_SPACE:
+		default:
+			// unimplemented, or we're unsure
+			kakadu->interpretation = VIPS_INTERPRETATION_MULTIBAND;
+			expected_colour_bands = kakadu->channels.get_num_colours();
+			break;
+		}
+
+		// can be more with alpha etc.
+		if (expected_colour_bands > kakadu->bands) {
+			vips_error(klass->nickname,
+				"%s", _("incorrect number of colour bands for colour space"));
+			return -1;
+		}
+
+		vips_foreign_load_kakadu_get_resolution(kakadu);
+
+#ifdef DEBUG
+		vips_foreign_load_kakadu_print(kakadu);
+#endif /*DEBUG*/
+
+		if (vips_foreign_load_kakadu_set_header(kakadu, load->out))
+			return -1;
+
+		VIPS_SETSTR(load->out->filename,
+			vips_connection_filename(VIPS_CONNECTION(kakadu->vips_source)));
+	}
+	catch (kdu_exception e) {
+		// the message has been handled already
+		return -1;
+	}
 
 	return 0;
 }
@@ -689,131 +691,139 @@ vips_foreign_load_kakadu_generate(VipsRegion *out,
 		r->left, r->top, r->width, r->height);
 #endif /*DEBUG_VERBOSE*/
 
-	// 16 seems like a sensible limit ... we want to avoid overcommitting
-	// thread resources if we can
-	int n_threads = VIPS_MIN(16, vips_concurrency_get());
+	try {
+		// 16 seems like a sensible limit ... we want to avoid overcommitting
+		// thread resources if we can
+		int n_threads = VIPS_MIN(16, vips_concurrency_get());
 
-	// we can't reuse this between libvips workers, unfortunately, since
-	// region_decompressor needs the calling thread to always be the same,
-	// which libvips can't guarantee
-	//
-	// we have to create and destroy thread_env for each tile
-	kdu_thread_env env;
-	env.create();
-	for (int i = 0; i < n_threads; i++)
-		if (!env.add_thread()) {
-			vips_error(klass->nickname, "%s", "thread create failed");
+		// we can't reuse this between libvips workers, unfortunately, since
+		// region_decompressor needs the calling thread to always be the same,
+		// which libvips can't guarantee
+		//
+		// we have to create and destroy thread_env for each tile
+		kdu_thread_env env;
+		env.create();
+		for (int i = 0; i < n_threads; i++)
+			if (!env.add_thread()) {
+				vips_error(klass->nickname, "%s", "thread create failed");
+				return -1;
+			}
+
+		// coordinates in tile_position are always in terms of the full size
+		// image, so we must scale up with the reduction factor
+		int scale = 1;
+		kdu_dims tile_position;
+		tile_position.pos = kdu_coords(r->left * scale, r->top * scale);
+		tile_position.size = kdu_coords(r->width * scale, r->height * scale);
+		kdu_coords expand_numerator(1, 1);
+		kdu_coords expand_denominator(1, 1);
+
+		// not used, since we supply a channel mapping
+		int single_component = 0;
+
+		// decode all quality layers
+		int max_layers = 1000;
+
+		// aim for speed rather than ultimate precision
+		bool precise = false;
+
+		// specify params in terms of the output image
+		kdu_component_access_mode mode = KDU_WANT_OUTPUT_COMPONENTS;
+
+		// aim for a fast path
+		bool fastest = true;
+
+		if (!kakadu->region_decompressor->start(
+				kakadu->codestream,
+				kakadu->channel_mapping,
+				single_component,
+				kakadu->page,
+				max_layers,
+				tile_position,
+				expand_numerator,
+				expand_denominator,
+				precise,
+				mode,
+				fastest,
+				&env)) {
+			vips_error(klass->nickname, "%s", "start failed");
 			return -1;
 		}
 
-	// coordinates in tile_position are always in terms of the full size
-	// image, so we must scale up with the reduction factor
-	int scale = 1;
-	kdu_dims tile_position;
-	tile_position.pos = kdu_coords(r->left * scale, r->top * scale);
-	tile_position.size = kdu_coords(r->width * scale, r->height * scale);
-	kdu_coords expand_numerator(1, 1);
-	kdu_coords expand_denominator(1, 1);
+		kdu_dims incomplete_region = tile_position;
+		kdu_dims new_region;
+		int top = r->top;
+		do {
+			// we have to step data down the output area while we generate it
+			kdu_byte *data = (kdu_byte *) VIPS_REGION_ADDR(out, r->left, top);
 
-	// not used, since we supply a channel mapping
-	int single_component = 0;
+			kdu_coords buffer_origin = kdu_coords(0, 0);
+			int row_gap = 0;
+			// decode c. 128 lines each call
+			int suggested_increment = 128 * r->width;
 
-	// decode all quality layers
-	int max_layers = 1000;
+			// we always want the whole tile
+			int max_region_pixels = 1000000000;
 
-	// aim for speed rather than ultimate precision
-	bool precise = false;
+			bool result;
+			switch (kakadu->format) {
+			case VIPS_FORMAT_UCHAR:
+				result = kakadu->region_decompressor->process(
+						data,
+						kakadu->channel_offsets,
+						kakadu->bands,
+						buffer_origin,
+						row_gap,
+						suggested_increment,
+						max_region_pixels,
+						incomplete_region,
+						new_region);
+				break;
 
-	// specify params in terms of the output image
-	kdu_component_access_mode mode = KDU_WANT_OUTPUT_COMPONENTS;
+			case VIPS_FORMAT_USHORT:
+				result = kakadu->region_decompressor->process(
+						(kdu_uint16*) data,
+						kakadu->channel_offsets,
+						kakadu->bands,
+						buffer_origin,
+						row_gap,
+						suggested_increment,
+						max_region_pixels,
+						incomplete_region,
+						new_region);
+				break;
 
-	// aim for a fast path
-	bool fastest = true;
+			case VIPS_FORMAT_FLOAT:
+				result = kakadu->region_decompressor->process(
+						(float*) data,
+						kakadu->channel_offsets,
+						kakadu->bands,
+						buffer_origin,
+						row_gap,
+						suggested_increment,
+						max_region_pixels,
+						incomplete_region,
+						new_region);
+				break;
 
-	if (!kakadu->region_decompressor->start(
-			kakadu->codestream,
-			kakadu->channel_mapping,
-			single_component,
-			kakadu->page,
-			max_layers,
-			tile_position,
-			expand_numerator,
-			expand_denominator,
-			precise,
-			mode,
-			fastest,
-			&env)) {
-		vips_error(klass->nickname, "%s", "start failed");
-		return -1;
+			default:
+				vips_error(klass->nickname, "%s", "unimplemented format");
+				return -1;
+			}
+
+			if (!result)
+				break;
+
+			// down by the number of generated scanlines
+			top += new_region.size.y;
+		} while (incomplete_region.size.y > 0);
+
+		if (!kakadu->region_decompressor->finish()) {
+			vips_error(klass->nickname, "%s", "finish failed");
+			return -1;
+		}
 	}
-
-	kdu_dims incomplete_region = tile_position;
-	kdu_dims new_region;
-	int top = r->top;
-	do {
-		// we have to step data down the output area while we generate it
-		kdu_byte *data = (kdu_byte *) VIPS_REGION_ADDR(out, r->left, top);
-
-		kdu_coords buffer_origin = kdu_coords(0, 0);
-		int row_gap = 0;
-		// decode c. 128 lines each call
-		int suggested_increment = 128 * r->width;
-
-		// we always want the whole tile
-		int max_region_pixels = 1000000000;
-
-		bool result;
-		switch (kakadu->format) {
-		case VIPS_FORMAT_UCHAR:
-			result = kakadu->region_decompressor->process(data,
-					kakadu->channel_offsets,
-					kakadu->bands,
-					buffer_origin,
-					row_gap,
-					suggested_increment,
-					max_region_pixels,
-					incomplete_region,
-					new_region);
-			break;
-
-		case VIPS_FORMAT_USHORT:
-			result = kakadu->region_decompressor->process((kdu_uint16*) data,
-					kakadu->channel_offsets,
-					kakadu->bands,
-					buffer_origin,
-					row_gap,
-					suggested_increment,
-					max_region_pixels,
-					incomplete_region,
-					new_region);
-			break;
-
-		case VIPS_FORMAT_FLOAT:
-			result = kakadu->region_decompressor->process((float*) data,
-					kakadu->channel_offsets,
-					kakadu->bands,
-					buffer_origin,
-					row_gap,
-					suggested_increment,
-					max_region_pixels,
-					incomplete_region,
-					new_region);
-			break;
-
-		default:
-			vips_error(klass->nickname, "%s", "unimplemented format");
-			return -1;
-		}
-
-		if (!result)
-			break;
-
-		// down by the number of generated scanlines
-		top += new_region.size.y;
-	} while (incomplete_region.size.y > 0);
-
-	if (!kakadu->region_decompressor->finish()) {
-		vips_error(klass->nickname, "%s", "finish failed");
+	catch (kdu_exception e) {
 		return -1;
 	}
 
