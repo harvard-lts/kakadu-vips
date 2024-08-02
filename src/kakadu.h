@@ -70,7 +70,6 @@ public:
 	flush(bool end_of_message)
 	{
 		if (end_of_message) {
-
 			vips_error("VipsForeignKakadu", "%s", 
 				std::accumulate(strings.begin(), 
 					            strings.end(), 
@@ -81,6 +80,8 @@ public:
 			// kdu_exception (an int)
 			throw -1;
 		}
+
+		kdu_thread_safe_message::flush(end_of_message);
 	}
 
 private:
@@ -104,6 +105,8 @@ public:
 							                std::string("")).c_str());
 			strings.clear();
 		}
+
+		kdu_thread_safe_message::flush(end_of_message);
 	}
 
 private:
