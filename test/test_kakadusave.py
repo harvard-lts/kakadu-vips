@@ -60,6 +60,24 @@ class TestKakaduSave:
         # ie. the option has had an effect
         assert len(data1) != len(data2)
 
+    # the ftyp brand follows the 12-byte signature box and the 8-byte ftyp
+    # box header
+    def ftyp_brand(self, data):
+        return data[20:24]
+
+    def test_kakadusave_brand(self):
+        assert self.ftyp_brand(self.ppm.kakadusave_buffer()) == b"jp2 "
+        assert self.ftyp_brand(self.ppm.kakadusave_buffer(htj2k=True)) == \
+            b"jph "
+        assert self.ftyp_brand(self.ppm.kakadusave_buffer(
+            options="Cmodes=HT")) == b"jph "
+
+    def test_kakadusave_brand_jph_suffix(self):
+        filename = temp_filename(self.tempdir, ".jph")
+        self.ppm.kakadusave(filename)
+        with open(filename, "rb") as f:
+            assert self.ftyp_brand(f.read(24)) == b"jph "
+
     def test_kakadusave_tlm(self):
         # tlm needs working rewrite in target
         data = self.ppm.kakadusave_buffer(options="Qfactor=90 Cmodes=HT ORGgen_plt=yes Creversible=no Cblk={64,64} ORGtparts=R ORGgen_tlm=9")
