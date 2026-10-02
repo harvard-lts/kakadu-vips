@@ -53,3 +53,8 @@ dkms.conf
 
 # automatic dependency management
 .depend
+
+# licensed Kakadu SDK -- only the tracked notes in kakadu/ are committed
+/kakadu/*
+!/kakadu/.gitignore
+!/kakadu/README.md

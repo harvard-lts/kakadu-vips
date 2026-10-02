@@ -1,0 +1,7 @@
+.git
+# unpacked SDK -- the image builds from kakadu/kakadu.zip
+kakadu/kakadu
+**/*.o
+**/*.so
+**/.depend
+**/__pycache__

@@ -421,6 +421,13 @@ vips_foreign_save_kakadu_build(VipsObject *object)
 				}
 		}
 
+		// finalize all main header attributes, then pass them to the
+		// file-format layer so it can pick the right brand ("jph " for
+		// Part-15 HTJ2K codestreams, "jp2 " otherwise) ... without this,
+		// kakadu always writes a "jp2 " brand
+		codestream.access_siz()->finalize_all();
+		dims.finalize_compatibility(codestream.access_siz());
+
 		output.write_header();
 		output.open_codestream(true);
 
