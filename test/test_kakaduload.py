@@ -64,3 +64,13 @@ class TestKakaduLoad:
         image = pyvips.Image.kakaduload(JP2K_RESOLUTION_FILE)
         assert abs(image.xres - 11.8) < 0.1
         assert abs(image.yres - 11.8) < 0.1
+
+    def test_kakaduload_keeps_source_colour(self):
+        # an embedded non-sRGB profile must not change the decoded pixels:
+        # they should load as stored, with the profile attached, so that
+        # colour management downstream converts them exactly once
+        plain = pyvips.Image.kakaduload_buffer(self.ppm.kakadusave_buffer())
+        data = self.ppm.kakadusave_buffer(profile="p3")
+        image = pyvips.Image.kakaduload_buffer(data)
+        assert image.get_typeof("icc-profile-data") != 0
+        assert (image - plain).abs().max() == 0

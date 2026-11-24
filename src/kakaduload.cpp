@@ -855,6 +855,17 @@ vips_foreign_load_kakadu_load(VipsForeignLoad *load)
 			kakadu->palette,
 			kakadu->dimensions);
 
+	// configure() also installs a colour converter to sRGB. libvips loaders
+	// should return pixels in the image's own colour space, with the ICC
+	// profile attached (see set_header), and leave colour management to
+	// icc_transform(), thumbnail(), etc. If we kept the converter, the
+	// pixels would be sRGB but tagged with the original profile, so any
+	// colour-managed step downstream would convert twice.
+	int icc_bytes;
+	if (kakadu->colour.get_icc_profile(&icc_bytes) &&
+		icc_bytes > 0)
+		kakadu->channel_mapping->colour_converter.clear();
+
 	kakadu->channel_offsets = VIPS_ARRAY(NULL, kakadu->bands, int);
 	for (int i = 0; i < kakadu->bands; i++) 
 		kakadu->channel_offsets[i] = i;

@@ -3,6 +3,8 @@
 ## master
 
 - improve handling of kakadu errors
+- don't colour convert to sRGB on load when there's an ICC profile, so pixels
+  match the attached profile
 
 ## 2024/4/4 1.0
 
